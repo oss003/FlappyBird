@@ -1,0 +1,3180 @@
+ca65 V2.9.2 - (C) Copyright 1998-2000 Ullrich von Bassewitz
+Main file   : flappy.asm
+Current file: flappy.asm
+
+000000r 1               ;--------------------------------------------------------------------
+000000r 1               ;Atomic Flappy Bird
+000000r 1               ;
+000000r 1               ; Flappy bird port based upon the Flatom Dragon version
+000000r 1               ;--------------------------------------------------------------------
+000000r 1               
+000000r 1               	.DEFINE asm_code $2c00
+000000r 1               	.DEFINE header   1		; Header Wouter Ras emulator
+000000r 1               	.DEFINE filenaam "ATOMICFLAPPY"
+000000r 1               
+000000r 1               .org asm_code-22*header
+002BEA  1               
+002BEA  1               .IF header
+002BEA  1               ;********************************************************************
+002BEA  1               ; ATM Header for Atom emulator Wouter Ras
+002BEA  1               
+002BEA  1               name_start:
+002BEA  1  41 54 4F 4D  	.byte filenaam			; Filename
+002BEE  1  49 43 46 4C  
+002BF2  1  41 50 50 59  
+002BF6  1               name_end:
+002BF6  1  00 00 00 00  	.repeat 16-name_end+name_start	; Fill with 0 till 16 chars
+002BFA  1               	  .byte $0
+002BFA  1               	.endrep
+002BFA  1               
+002BFA  1  00 2C        	.word asm_code			; 2 bytes startaddress
+002BFC  1  00 2C        	.word exec			; 2 bytes linkaddress
+002BFE  1  D8 20        	.word eind_asm-start_asm	; 2 bytes filelength
+002C00  1               
+002C00  1               ;********************************************************************
+002C00  1               .ENDIF
+002C00  1               
+002C00  1               
+002C00  1               exec = start_asm
+002C00  1               start_asm:
+002C00  1               	.include "atomicflappy.inc"	; Main program
+002C00  1               	.include "getready.inc"		; Get Ready banner
+002C00  2               ;--------------------------------------------------------------------------
+002C00  2               ; ATOMIC FLAPPY BIRD
+002C00  2               ;
+002C00  2               ; Flappy bird port for the Acorn Atom based upon Flagon Bird for the Dragon
+002C00  2               ; written by Bosco (Steve Bamford)
+002C00  2               ;
+002C00  2               ; Program principle:
+002C00  2               ;
+002C00  2               ; - Main loop start
+002C00  2               ; -   Loop through every char in scr_current
+002C00  2               ; -      Execute action nr (=char nr) from ani_table
+002C00  2               ; -      Put changed screen chars in scr_update buffer
+002C00  2               ; -   Loop through every char in scr_update buffer 
+002C00  2               ; -      Plot changed char on screen
+002C00  2               ; -   Plot flappy
+002C00  2               ; -   Plot score
+002C00  2               ; -   Scan keys
+002C00  2               ; - Repeat main loop
+002C00  2               ;
+002C00  2               ; Variable arrays:
+002C00  2               ; - scr_base	= array of 32x12 characters for basic screen layout
+002C00  2               ; - scr_current	= array of 32x12 characters for displayed screen
+002C00  2               ; - scr_update	= array with screenbytes to be updated
+002C00  2               ;
+002C00  2               ; - ani_table	= table with 256 addresses of ani_routines called
+002C00  2               ;                 by action routine
+002C00  2               ; - sprites	= storage chars for bottombar, background, pipes, flappy
+002C00  2               ; - tiles	= storage graphics for tiles like start, scoreboard
+002C00  2               ; - numbers	= storage graphics for score numbers;                 
+002C00  2               ;
+002C00  2               ; Routine:
+002C00  2               ; - ani_action	= routine which steps through scr_current and executes
+002C00  2               ;		  action depending on character nr
+002C00  2               ; - scr_timer	= routine to display timer
+002C00  2               ; - scr_fl_bird	= routine do display flappy bird
+002C00  2               ; - prg_scankey	= routine to scan keys
+002C00  2               ; 
+002C00  2               ;--------------------------------------------------------------------------
+002C00  2               
+002C00  2               ;--------------------------------------------------------------------------
+002C00  2               ; Start Atomic Flappy Bird
+002C00  2               ;--------------------------------------------------------------------------
+002C00  2               
+002C00  2               SID	= 1			; Quick hack for SIDplayer at $800 and 
+002C00  2               				; Angry Bird song at $900-$2094
+002C00  2               
+002C00  2               .IF SID
+002C00  2               
+002C00  2               init_SID	= $800
+002C00  2               silent_SID	= $842
+002C00  2               start_SID	= $900
+002C00  2               stop_SID	= $909
+002C00  2               
+002C00  2               .ENDIF
+002C00  2               
+002C00  2               display		= $8000
+002C00  2               gr_mode		= $b000
+002C00  2               timer		= $b808
+002C00  2               
+002C00  2               stack_ptr	= 4
+002C00  2               
+002C00  2               os_random	= $c986
+002C00  2               os_wait_sync2	= $fe66
+002C00  2               os_wait_sync 	= $fe6b
+002C00  2               os_keyscan	= $fe71
+002C00  2               os_waitkey	= $ffe3
+002C00  2               
+002C00  2               ws		= $80
+002C00  2               
+002C00  2               addr_ptr	= ws
+002C00  2               addr_ptr2	= ws+2
+002C00  2               addr_ptr3	= ws+4
+002C00  2               
+002C00  2               x_pos		= ws+6
+002C00  2               y_pos		= ws+7
+002C00  2               
+002C00  2               jmp_addr	= ws+8
+002C00  2               
+002C00  2               tmp_x		= ws+10
+002C00  2               tmp_y		= ws+11
+002C00  2               counter		= ws+12
+002C00  2               
+002C00  2               chr_ptr		= ws+13
+002C00  2               txt_x		= ws+14
+002C00  2               txt_y		= ws+15
+002C00  2               txt_flag	= ws+16
+002C00  2               
+002C00  2               seed		= ws+17
+002C00  2               score_flag	= ws+18
+002C00  2               
+002C00  2               flappy_y	= ws+19
+002C00  2               flappy_speed	= ws+20
+002C00  2               
+002C00  2               key_pressed	= ws+21
+002C00  2               key_released	= ws+22
+002C00  2               hit_flag	= ws+23
+002C00  2               pipe_top	= ws+24
+002C00  2               pipe_bot	= ws+25
+002C00  2               death_flag	= ws+26
+002C00  2               flappy_xpos	= ws+27
+002C00  2               
+002C00  2               save_x		= ws+28
+002C00  2               save_y		= ws+29
+002C00  2               
+002C00  2               digit1_buf	= ws+30	; 6 bytes
+002C00  2               digit2_buf	= ws+36	; 6 bytes
+002C00  2               digit3_buf	= ws+42	; 6 bytes
+002C00  2               
+002C00  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C00  2               ; Constants
+002C00  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C00  2               
+002C00  2               flappy_upwards	= 6		
+002C00  2               flappy_max	= 76
+002C00  2               flappy_gravity	= 1
+002C00  2               
+002C00  2               columns		= 32
+002C00  2               rows		= 12
+002C00  2               
+002C00  2               ;--------------------------------------------------------------------------
+002C00  2               ; Switch to CLEAR3 colour mode and init vars
+002C00  2               ;
+002C00  2               ; char   = 4 x 8 coloured pixels
+002C00  2               ; MODE3a = 128 x 96 coloured pixels
+002C00  2               ;        = 32 x 12 chars
+002C00  2               ;--------------------------------------------------------------------------
+002C00  2               
+002C00  2               program_entry:
+002C00  2               
+002C00  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C00  2               	; Init vars
+002C00  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C00  2               
+002C00  2  A9 FF        	lda #$ff		; Reset frame counter
+002C02  2  85 8C        	sta counter
+002C04  2               
+002C04  2  A9 00        	lda #0			; Flag to indicate end of game
+002C06  2  85 9A        	sta death_flag
+002C08  2               
+002C08  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C08  2               	; Screen init
+002C08  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C08  2               
+002C08  2  A9 90        	lda #$90		; Switch to CLEAR3a
+002C0A  2  8D 00 B0     	sta gr_mode
+002C0D  2               
+002C0D  2               .IF SID
+002C0D  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C0D  2               	; Init SID
+002C0D  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C0D  2               
+002C0D  2  20 00 08     	jsr init_SID
+002C10  2  20 42 08     	jsr silent_SID
+002C13  2  20 09 09     	jsr stop_SID
+002C16  2               .ENDIF
+002C16  2               
+002C16  2               ;--------------------------------------------------------------------------
+002C16  2               ; Display title screen with text scroller
+002C16  2               ;--------------------------------------------------------------------------
+002C16  2               
+002C16  2               title_scr:
+002C16  2  A9 0D        	lda #13			; Center Flappy horizontal
+002C18  2  85 9B        	sta flappy_xpos
+002C1A  2               
+002C1A  2  20 1E 2F     	jsr plot_background	; Copy background to screen and mark as changed
+002C1D  2  20 C6 2F     	jsr update_scr		; Display background
+002C20  2  20 C1 32     	jsr reset_flappy	; Reset Flappy coordinates and clear buffer
+002C23  2               
+002C23  2  A2 03        	ldx #banner_title	; Display Get Ready banner
+002C25  2  20 B5 2E     	jsr plot_banner
+002C28  2               
+002C28  2  A9 2C        	lda #44			; Y-position Flappy
+002C2A  2  85 93        	sta flappy_y
+002C2C  2  20 D2 32     	jsr backup_back		; Backup background into buffer
+002C2F  2               
+002C2F  2  A9 00        	lda #0
+002C31  2  85 8D        	sta chr_ptr		; Reset textpointer
+002C33  2  85 90        	sta txt_flag		; Reset pauzeflag after displaying one line
+002C35  2               
+002C35  2  A9 DF        	lda #<$86df		; Set Textscroller entry point
+002C37  2  85 8E        	sta txt_x
+002C39  2  A9 86        	lda #>$86df
+002C3B  2  85 8F        	sta txt_y
+002C3D  2               
+002C3D  2               title_loop:
+002C3D  2               
+002C3D  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C3D  2               	; Display screen
+002C3D  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C3D  2               
+002C3D  2  20 C6 2F     	jsr update_scr		; Print changed chars on screen
+002C40  2  20 F4 2F     	jsr animate_scr		; Animate chars 
+002C43  2               	
+002C43  2  A5 93        	lda flappy_y
+002C45  2  C9 22        	cmp #$22		; If Flappy to far down, emulate keypress
+002C47  2  90 04        	bcc no_move_flappy1
+002C49  2  A9 FF        	lda #$ff		; Emulate keypress
+002C4B  2  85 95        	sta key_pressed
+002C4D  2               no_move_flappy1:
+002C4D  2               
+002C4D  2  20 B2 31     	jsr flappy_scr		; Plot Flappy on screen and update coordinates
+002C50  2               
+002C50  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C50  2               	; Update text scroller
+002C50  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C50  2               
+002C50  2  A5 8D        	lda chr_ptr		; If not EOL, skip
+002C52  2  29 1F        	and #$1f
+002C54  2  D0 16        	bne no_wait
+002C56  2               
+002C56  2  E6 90        	inc txt_flag		; EOL, start incremening pauze counter
+002C58  2  A5 90        	lda txt_flag
+002C5A  2  29 7F        	and #$7f
+002C5C  2  D0 16        	bne skip_scroll		; Skip if pauzecounter<$80
+002C5E  2               
+002C5E  2  A9 00        	lda #0			; End of pauze, reset pauzeflag
+002C60  2  85 90        	sta txt_flag
+002C62  2               
+002C62  2  A5 8D        	lda chr_ptr
+002C64  2  C9 A0        	cmp #text_scroll_len	; Check end of text
+002C66  2  D0 04        	bne no_wait
+002C68  2  A2 00        	ldx #0			; If end of text, reset textpointer
+002C6A  2  86 8D        	stx chr_ptr
+002C6C  2               no_wait:
+002C6C  2  A6 8D        	ldx chr_ptr		; Set textpointer
+002C6E  2  20 84 33     	jsr textscroller	; Scroll text
+002C71  2  E8           	inx
+002C72  2  86 8D        	stx chr_ptr		; Point to next text scroll character
+002C74  2               
+002C74  2               skip_scroll:
+002C74  2  E6 8C        	inc counter		; Increment framecounter
+002C76  2               
+002C76  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C76  2               	; Check keypress
+002C76  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002C76  2               
+002C76  2  20 71 FE     	jsr os_keyscan		; Loop until keypress
+002C79  2  B0 C2        	bcs title_loop
+002C7B  2               
+002C7B  2               ;--------------------------------------------------------------------------
+002C7B  2               ; Start intro loop
+002C7B  2               ;
+002C7B  2               ; - Display screen
+002C7B  2               ; - Display Get Ready banner
+002C7B  2               ; - Display Tap key banner
+002C7B  2               ; - Animate Flappy and wait for key
+002C7B  2               ;--------------------------------------------------------------------------
+002C7B  2               
+002C7B  2               start_intro:
+002C7B  2  A9 02        	lda #2			; Position Flappy to the left
+002C7D  2  85 9B        	sta flappy_xpos
+002C7F  2               
+002C7F  2  A9 00        	lda #0			; Mark Flappy undeath
+002C81  2  85 9A        	sta death_flag
+002C83  2               
+002C83  2  20 1E 2F     	jsr plot_background	; Copy background to screen and mark as changed
+002C86  2  20 C6 2F     	jsr update_scr		; Display background
+002C89  2  20 C1 32     	jsr reset_flappy
+002C8C  2               
+002C8C  2  A2 00        	ldx #banner_get_ready
+002C8E  2  20 B5 2E     	jsr plot_banner		; Display Get Ready banner
+002C91  2  A2 01        	ldx #banner_tap
+002C93  2  20 B5 2E     	jsr plot_banner		; Display Tap key banner
+002C96  2               
+002C96  2               intro_loop:
+002C96  2  20 C6 2F     	jsr update_scr		; Print changed chars on screen
+002C99  2  20 F4 2F     	jsr animate_scr		; Animate chars 
+002C9C  2               	
+002C9C  2  A5 93        	lda flappy_y
+002C9E  2  C9 2A        	cmp #$2a		; If Flappy falling, emulate keypress
+002CA0  2  90 04        	bcc no_move_flappy
+002CA2  2  A9 FF        	lda #$ff		; Emulate keypress
+002CA4  2  85 95        	sta key_pressed
+002CA6  2               no_move_flappy:
+002CA6  2  20 B2 31     	jsr flappy_scr		; Plot Flappy on screen and update coordinates
+002CA9  2               
+002CA9  2               wait_loop:
+002CA9  2  A2 F0        	ldx #$f0
+002CAB  2  20 16 35     	jsr wait		; Wait ca.x*5 sec
+002CAE  2               
+002CAE  2  E6 8C        	inc counter		; Increment framecounter
+002CB0  2               
+002CB0  2  20 71 FE     	jsr os_keyscan		; Loop until keypress
+002CB3  2  B0 E1        	bcs intro_loop
+002CB5  2               
+002CB5  2               loop_entry:
+002CB5  2  A9 00        	lda #0			; Reset score
+002CB7  2  8D 7E 33     	sta score
+002CBA  2  8D 7F 33     	sta score+1
+002CBD  2  8D 80 33     	sta score+2
+002CC0  2  85 92        	sta score_flag
+002CC2  2               
+002CC2  2  20 1E 2F     	jsr plot_background	; Restore background to screen
+002CC5  2  20 C1 32     	jsr reset_flappy	; Reset Flappy coordinates and clear buffer
+002CC8  2               
+002CC8  2               ;--------------------------------------------------------------------------
+002CC8  2               ; Start main game loop
+002CC8  2               ;
+002CC8  2               ; - Insert every 64 frames new pipe on screen
+002CC8  2               ; - Backup score background in current screen array
+002CC8  2               ; - Copy score in current screen array
+002CC8  2               ; - Restore score background in current screen array
+002CC8  2               ; - Update score
+002CC8  2               ;--------------------------------------------------------------------------
+002CC8  2               
+002CC8  2               .IF SID
+002CC8  2  20 00 09     	jsr start_SID
+002CCB  2               .ENDIF
+002CCB  2               
+002CCB  2               main_loop:
+002CCB  2               
+002CCB  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002CCB  2               	; Insert new pipes after every 64 frames
+002CCB  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002CCB  2               
+002CCB  2  A5 8C        	lda counter		; Check if pipe has to be plotted
+002CCD  2  29 3F        	and #$3f
+002CCF  2  D0 03        	bne counteradd
+002CD1  2  20 37 2F     	jsr insert_pipes	; Insert new pipe on right screenborder
+002CD4  2               
+002CD4  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002CD4  2               	; Set addresses correct number for digit
+002CD4  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002CD4  2               
+002CD4  2               counteradd:
+002CD4  2  AE 7E 33     	ldx score		; Digit1
+002CD7  2  BD 85 39     	lda num_lb,x
+002CDA  2  8D 35 2D     	sta numaddr1+1
+002CDD  2  BD 8F 39     	lda num_hb,x
+002CE0  2  8D 36 2D     	sta numaddr1+2
+002CE3  2               
+002CE3  2  AE 7F 33     	ldx score+1		; Digit2
+002CE6  2  BD 85 39     	lda num_lb,x
+002CE9  2  8D 27 2D     	sta numaddr2+1
+002CEC  2  BD 8F 39     	lda num_hb,x
+002CEF  2  8D 28 2D     	sta numaddr2+2
+002CF2  2               
+002CF2  2  AE 80 33     	ldx score+2		; Digit3
+002CF5  2  BD 85 39     	lda num_lb,x
+002CF8  2  8D 11 2D     	sta numaddr3+1
+002CFB  2  BD 8F 39     	lda num_hb,x
+002CFE  2  8D 12 2D     	sta numaddr3+2
+002D01  2               
+002D01  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002D01  2               	; Backup score background from scr_current
+002D01  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002D01  2               
+002D01  2  A2 05        	ldx #5
+002D03  2               score_loop:
+002D03  2  AD 80 33     	lda score+2		; Check if 100-digit=0
+002D06  2  F0 11        	beq chk_bup2		; If 0 then check 10-digit=0
+002D08  2               
+002D08  2  BC 43 39     	ldy digit3,x		; Buffer background digit3 pos
+002D0B  2  B9 2D 3E     	lda scr_current,y
+002D0E  2  95 AA        	sta digit3_buf,x
+002D10  2               numaddr3:
+002D10  2  BD FF FF     	lda $FFFF,x
+002D13  2  99 2D 3E     	sta scr_current,y
+002D16  2  4C 1E 2D     	jmp skip_chk_bup2
+002D19  2               
+002D19  2               chk_bup2:
+002D19  2  AD 7F 33     	lda score+1		; Check if 10-digit=0
+002D1C  2  F0 0E        	beq backup1		; If 0 then backup 1-digit
+002D1E  2               
+002D1E  2               skip_chk_bup2:
+002D1E  2  BC 3D 39     	ldy digit2,x		; Buffer background digit1 pos
+002D21  2  B9 2D 3E     	lda scr_current,y
+002D24  2  95 A4        	sta digit2_buf,x
+002D26  2               numaddr2:
+002D26  2  BD FF FF     	lda $FFFF,x
+002D29  2  99 2D 3E     	sta scr_current,y
+002D2C  2               
+002D2C  2               backup1:
+002D2C  2  BC 37 39     	ldy digit1,x		; Buffer background digit2 pos
+002D2F  2  B9 2D 3E     	lda scr_current,y
+002D32  2  95 9E        	sta digit1_buf,x
+002D34  2               numaddr1:
+002D34  2  BD FF FF     	lda $FFFF,x
+002D37  2  99 2D 3E     	sta scr_current,y
+002D3A  2               
+002D3A  2  CA           	dex
+002D3B  2  10 C6        	bpl score_loop
+002D3D  2               
+002D3D  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002D3D  2               	; Update screen
+002D3D  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002D3D  2               
+002D3D  2  20 C6 2F     	jsr update_scr		; Print changed chars on screen
+002D40  2  20 B2 31     	jsr flappy_scr		; Plot Flappy on screen and update coordinates
+002D43  2               
+002D43  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002D43  2               	; Restore score background in scr_current
+002D43  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002D43  2               
+002D43  2  A2 05        	ldx #5
+002D45  2               score_loop2:
+002D45  2  AD 80 33     	lda score+2		; Check if 100-digit=0
+002D48  2  F0 0D        	beq chk_res2		; If 0 then check 10-digit=0
+002D4A  2               
+002D4A  2  BC 43 39     	ldy digit3,x		; Restore background digit3 pos
+002D4D  2  B5 AA        	lda digit3_buf,x
+002D4F  2  29 7F        	and #$7f
+002D51  2  99 2D 3E     	sta scr_current,y
+002D54  2  4C 5C 2D     	jmp skip_res_chk2
+002D57  2               
+002D57  2               chk_res2:
+002D57  2  AD 7F 33     	lda score+1		; Check if 10-digit=0
+002D5A  2  F0 0A        	beq restore1		; If 0 then restore 1-digit
+002D5C  2               
+002D5C  2               skip_res_chk2:
+002D5C  2  BC 3D 39     	ldy digit2,x		; Restore background digit2 pos
+002D5F  2  B5 A4        	lda digit2_buf,x
+002D61  2  29 7F        	and #$7f
+002D63  2  99 2D 3E     	sta scr_current,y
+002D66  2               
+002D66  2               restore1:
+002D66  2  BC 37 39     	ldy digit1,x		; Restore background digit1 pos
+002D69  2  B5 9E        	lda digit1_buf,x
+002D6B  2  29 7F        	and #$7f
+002D6D  2  99 2D 3E     	sta scr_current,y
+002D70  2               
+002D70  2  CA           	dex
+002D71  2  10 D2        	bpl score_loop2
+002D73  2               
+002D73  2  20 F4 2F     	jsr animate_scr		; Animate chars 
+002D76  2  20 F8 34     	jsr scan_key
+002D79  2               
+002D79  2  E6 8C        	inc counter		; Increment framecounter
+002D7B  2  20 F4 32     	jsr chk_flappy_hit
+002D7E  2  D0 39        	bne end_game
+002D80  2               
+002D80  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002D80  2               	; Check if score has to be updated
+002D80  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002D80  2               
+002D80  2  AD 2D 3E     	lda scr_current
+002D83  2  C9 C4        	cmp #68+$80		; Check if pipebody is hitting left border screen
+002D85  2  F0 07        	beq update_score
+002D87  2  C9 A8        	cmp #40+$80		; Check if pipetop is hitting left border screen
+002D89  2  F0 03        	beq update_score
+002D8B  2  4C CB 2C     	jmp main_loop
+002D8E  2               
+002D8E  2               update_score:
+002D8E  2  EE 7E 33     	inc score		; Increment score digits
+002D91  2               
+002D91  2  AD 7E 33     	lda score		; Check overflow 1-digit
+002D94  2  C9 0A        	cmp #10
+002D96  2  D0 1E        	bne go_loop
+002D98  2  A9 00        	lda #0
+002D9A  2  8D 7E 33     	sta score
+002D9D  2  EE 7F 33     	inc score+1
+002DA0  2               
+002DA0  2  AD 7F 33     	lda score+1		; Check overflow 10-digit
+002DA3  2  C9 0A        	cmp #10
+002DA5  2  D0 0F        	bne go_loop
+002DA7  2  A9 00        	lda #0
+002DA9  2  8D 7F 33     	sta score+1
+002DAC  2  EE 80 33     	inc score+2
+002DAF  2  4C CB 2C     	jmp main_loop
+002DB2  2               
+002DB2  2               no_pipe:
+002DB2  2  A9 00        	lda #0
+002DB4  2  85 92        	sta score_flag
+002DB6  2               go_loop:
+002DB6  2  4C CB 2C     	jmp main_loop		; Repeat main game loop
+002DB9  2               
+002DB9  2               ;--------------------------------------------------------------------------
+002DB9  2               ; Flappy death, game over
+002DB9  2               ;--------------------------------------------------------------------------
+002DB9  2               
+002DB9  2               end_game:
+002DB9  2               
+002DB9  2               .IF SID
+002DB9  2  20 42 08     	jsr silent_SID
+002DBC  2  20 09 09     	jsr stop_SID
+002DBF  2               .ENDIF
+002DBF  2               
+002DBF  2  A9 01        	lda #1			; Mark Flappy hit
+002DC1  2  85 9A        	sta death_flag
+002DC3  2               
+002DC3  2               fall_loop:
+002DC3  2  20 B2 31     	jsr flappy_scr		; Flappy falls down
+002DC6  2               
+002DC6  2  20 66 FE     	jsr os_wait_sync2	; Wait for next flyback
+002DC9  2               
+002DC9  2  A5 93        	lda flappy_y		; If Flappy falling, check for hit bottom
+002DCB  2  C9 4C        	cmp #$4c
+002DCD  2  90 F4        	bcc fall_loop
+002DCF  2               
+002DCF  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002DCF  2               	; Restore background screen so remove pipes
+002DCF  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002DCF  2               
+002DCF  2  20 1E 2F     	jsr plot_background	; Copy background to screen and mark as changed
+002DD2  2  20 C9 30     	jsr add_scoreboard	; Add scoreboard to background
+002DD5  2  20 C6 2F     	jsr update_scr		; Display background
+002DD8  2               
+002DD8  2  A2 02        	ldx #banner_game_over
+002DDA  2  20 B5 2E     	jsr plot_banner		; Display Game Over banner
+002DDD  2               
+002DDD  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002DDD  2               	; Display Flappy death
+002DDD  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002DDD  2               
+002DDD  2  20 A6 32     	jsr calc_flappy_pos	; Display Flappy death
+002DE0  2  20 04 32     	jsr entry_death
+002DE3  2               
+002DE3  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002DE3  2               	; Check high-score
+002DE3  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002DE3  2               
+002DE3  2  AD 80 33     	lda score+2		; Check 100-digit
+002DE6  2  CD 83 33     	cmp hi_score+2
+002DE9  2  90 29        	bcc not_hi_score
+002DEB  2  F0 03        	beq chk_hi10
+002DED  2  4C 02 2E     	jmp set_hiscore
+002DF0  2               chk_hi10:
+002DF0  2  AD 7F 33     	lda score+1		; Check 10-digit
+002DF3  2  CD 82 33     	cmp hi_score+1
+002DF6  2  90 1C        	bcc not_hi_score
+002DF8  2  D0 08        	bne set_hiscore
+002DFA  2               
+002DFA  2  AD 7E 33     	lda score		; Check 1-digit
+002DFD  2  CD 81 33     	cmp hi_score
+002E00  2  90 12        	bcc not_hi_score
+002E02  2               set_hiscore:
+002E02  2  AD 7E 33     	lda score		; Copy score into high score
+002E05  2  8D 81 33     	sta hi_score
+002E08  2  AD 7F 33     	lda score+1
+002E0B  2  8D 82 33     	sta hi_score+1
+002E0E  2  AD 80 33     	lda score+2
+002E11  2  8D 83 33     	sta hi_score+2
+002E14  2               not_hi_score:
+002E14  2               
+002E14  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002E14  2               	; Print text in scoreboard
+002E14  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002E14  2               
+002E14  2  A2 10        	ldx #<txt_score		; Print Score
+002E16  2  A0 31        	ldy #>txt_score
+002E18  2  20 A3 34     	jsr print_string
+002E1B  2               
+002E1B  2  A2 18        	ldx #<txt_best		; Print Best
+002E1D  2  A0 31        	ldy #>txt_best
+002E1F  2  20 A3 34     	jsr print_string
+002E22  2               
+002E22  2  A2 1F        	ldx #<txt_rank		; Print Rank
+002E24  2  A0 31        	ldy #>txt_rank
+002E26  2  20 A3 34     	jsr print_string
+002E29  2               
+002E29  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002E29  2               	; Print score in scoreboard
+002E29  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002E29  2               
+002E29  2  AD 80 33     	lda score+2		; Check if 100-digit=0
+002E2C  2  F0 0A        	beq sc_chk_prt2		; If 0 then check 10-digit=0
+002E2E  2               
+002E2E  2  A2 92        	ldx #<$8392		; Display 100-digit score
+002E30  2  A0 83        	ldy #>$8392
+002E32  2  20 C2 34     	jsr print_digit
+002E35  2  4C 3D 2E     	jmp sc_skip_chk_prt2
+002E38  2               sc_chk_prt2:
+002E38  2  AD 7F 33     	lda score+1		; Check if 10-digit=0
+002E3B  2  F0 0A        	beq sc_print1		; If 0 then print 1-digit
+002E3D  2               sc_skip_chk_prt2:
+002E3D  2  A2 94        	ldx #<$8394		; Display 10-digit score
+002E3F  2  A0 83        	ldy #>$8394
+002E41  2  AD 7F 33     	lda score+1
+002E44  2  20 C2 34     	jsr print_digit
+002E47  2               sc_print1:
+002E47  2  A2 96        	ldx #<$8396		; Display 1-digit score
+002E49  2  A0 83        	ldy #>$8396
+002E4B  2  AD 7E 33     	lda score
+002E4E  2  20 C2 34     	jsr print_digit
+002E51  2               
+002E51  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002E51  2               	; Print high score in scoreboard
+002E51  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002E51  2               
+002E51  2  AD 83 33     	lda hi_score+2		; Check if 100-digit=0
+002E54  2  F0 0A        	beq hi_chk_prt2		; If 0 then check 10-digit=0
+002E56  2               
+002E56  2  A2 12        	ldx #<$8512		; Display 100-digit hi-score
+002E58  2  A0 85        	ldy #>$8512
+002E5A  2  20 C2 34     	jsr print_digit
+002E5D  2  4C 65 2E     	jmp hi_skip_chk_prt2
+002E60  2               hi_chk_prt2:
+002E60  2  AD 82 33     	lda hi_score+1		; Check if 10-digit=0
+002E63  2  F0 0A        	beq hi_print1		; If 0 then print 1-digit
+002E65  2               hi_skip_chk_prt2:
+002E65  2  A2 14        	ldx #<$8514		; Display 10-digit hi-score
+002E67  2  A0 85        	ldy #>$8514
+002E69  2  AD 82 33     	lda hi_score+1
+002E6C  2  20 C2 34     	jsr print_digit
+002E6F  2               hi_print1:
+002E6F  2  A2 16        	ldx #<$8516		; Display 1-digit hi_score
+002E71  2  A0 85        	ldy #>$8516
+002E73  2  AD 81 33     	lda hi_score
+002E76  2  20 C2 34     	jsr print_digit
+002E79  2               
+002E79  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002E79  2               	; Print rank (0-9) depending on 10-digit score
+002E79  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002E79  2               
+002E79  2  A2 09        	ldx #9			; Set rank pointer
+002E7B  2  86 9C        	stx save_x
+002E7D  2               
+002E7D  2  AD 80 33     	lda score+2		; If score>99 -> rank always highest
+002E80  2  D0 0B        	bne rank_ok
+002E82  2               rank_loop:
+002E82  2  A5 9C        	lda save_x
+002E84  2  CD 7F 33     	cmp score+1
+002E87  2  F0 04        	beq rank_ok		; Check 10-digit
+002E89  2  C6 9C        	dec save_x
+002E8B  2  D0 F5        	bne rank_loop
+002E8D  2               rank_ok:
+002E8D  2  A6 9C        	ldx save_x		; Fill in rank nr
+002E8F  2  BD 9E 31     	lda rank_lb,x
+002E92  2  85 80        	sta addr_ptr
+002E94  2  BD A8 31     	lda rank_hb,x
+002E97  2  85 81        	sta addr_ptr+1
+002E99  2  A0 09        	ldy #9
+002E9B  2  18           	clc
+002E9C  2  AD 7E 33     	lda score
+002E9F  2  69 30        	adc #48
+002EA1  2  91 80        	sta (addr_ptr),y
+002EA3  2               
+002EA3  2  A6 80        	ldx addr_ptr		; Print rank text address
+002EA5  2  A4 81        	ldy addr_ptr+1
+002EA7  2  20 A3 34     	jsr print_string
+002EAA  2                
+002EAA  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002EAA  2               	; Loop until keypress
+002EAA  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002EAA  2               
+002EAA  2  20 E3 FF     	jsr os_waitkey		; Wait keypress
+002EAD  2               wait_release:
+002EAD  2  20 71 FE     	jsr os_keyscan
+002EB0  2  90 FB        	bcc wait_release	; Wait for release
+002EB2  2               
+002EB2  2  4C 7B 2C     	jmp start_intro		; Restart
+002EB5  2               
+002EB5  2               ;--------------------------------------------------------------------------
+002EB5  2               ; Copy banner on screen
+002EB5  2               ;--------------------------------------------------------------------------
+002EB5  2               
+002EB5  2               plot_banner:
+002EB5  2  BD 06 2F     	lda banner_addr_lb,x	; Get banner address
+002EB8  2  85 80        	sta addr_ptr
+002EBA  2  BD 0A 2F     	lda banner_addr_hb,x
+002EBD  2  85 81        	sta addr_ptr+1
+002EBF  2               
+002EBF  2  BD 0E 2F     	lda banner_x,x		; Get screen address
+002EC2  2  85 82        	sta addr_ptr2
+002EC4  2  BD 12 2F     	lda banner_y,x
+002EC7  2  85 83        	sta addr_ptr2+1
+002EC9  2               
+002EC9  2  BD 16 2F     	lda banner_width,x	; Get banner width
+002ECC  2  85 8A        	sta tmp_x
+002ECE  2  BD 1A 2F     	lda banner_heigth,x	; Get banner heigth
+002ED1  2  85 8B        	sta tmp_y
+002ED3  2               
+002ED3  2  A9 00        	lda #0
+002ED5  2  85 87        	sta y_pos		; Row counter
+002ED7  2               banner_y_loop:
+002ED7  2  A0 00        	ldy #0			; Column counter
+002ED9  2               banner_x_loop:
+002ED9  2  B1 80        	lda (addr_ptr),y	; Display 1 row
+002EDB  2  91 82        	sta (addr_ptr2),y
+002EDD  2  C8           	iny
+002EDE  2  C4 8A        	cpy tmp_x
+002EE0  2  D0 F7        	bne banner_x_loop
+002EE2  2               
+002EE2  2  18           	clc			; Point to next banner address
+002EE3  2  A5 80        	lda addr_ptr
+002EE5  2  7D 16 2F     	adc banner_width,x
+002EE8  2  85 80        	sta addr_ptr
+002EEA  2  A9 00        	lda #0
+002EEC  2  65 81        	adc addr_ptr+1
+002EEE  2  85 81        	sta addr_ptr+1
+002EF0  2               
+002EF0  2  18           	clc			; Point to next screen address
+002EF1  2  A5 82        	lda addr_ptr2
+002EF3  2  69 20        	adc #$20
+002EF5  2  85 82        	sta addr_ptr2
+002EF7  2  A9 00        	lda #0
+002EF9  2  65 83        	adc addr_ptr2+1
+002EFB  2  85 83        	sta addr_ptr2+1
+002EFD  2               
+002EFD  2  E6 87        	inc y_pos		; Repeat for all rows
+002EFF  2  A5 87        	lda y_pos
+002F01  2  C5 8B        	cmp tmp_y
+002F03  2  D0 D2        	bne banner_y_loop
+002F05  2               
+002F05  2  60           	rts
+002F06  2               
+002F06  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002F06  2               ; Banner data storage
+002F06  2               ; lb+hb Banneraddress, lb+hb Screen address, Banner width, Banner heigth
+002F06  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002F06  2               
+002F06  2               banner_get_ready	= 0
+002F06  2               banner_tap		= 1
+002F06  2               banner_game_over	= 2
+002F06  2               banner_title		= 3
+002F06  2               
+002F06  2  AD BD B9 B3  banner_addr_lb:	.byte <getready,<tap  ,<gameover,<title
+002F0A  2  40 42 43 45  banner_addr_hb:	.byte >getready,>tap  ,>gameover,>title
+002F0E  2  05 C9 45 05  banner_x:	.byte <$8105   ,<$84c9,<$8045	,<$8005
+002F12  2  81 84 80 80  banner_y:	.byte >$8105   ,>$84c9,>$8045   ,>$8005
+002F16  2  16 0E 16 17  banner_width:	.byte 22       ,14    ,22       ,23
+002F1A  2  18 12 14 2F  banner_heigth:	.byte 24       ,18    ,20       ,47
+002F1E  2               
+002F1E  2               ;--------------------------------------------------------------------------
+002F1E  2               ; Copy background into current screen and update screen
+002F1E  2               ;
+002F1E  2               ; - Copy complete screen background into current screen
+002F1E  2               ; - Mark all char as changed
+002F1E  2               ;--------------------------------------------------------------------------
+002F1E  2               
+002F1E  2               plot_background:
+002F1E  2  A2 00        	ldx #0			; Copy first 8 rows
+002F20  2               x1_loop:
+002F20  2  BD AD 3C     	lda scr_base,x		; Get background character
+002F23  2  09 80        	ora #$80		; Mark as changed
+002F25  2  9D 2D 3E     	sta scr_current,x	; Copy into current screen
+002F28  2  E8           	inx
+002F29  2  D0 F5        	bne x1_loop
+002F2B  2               x2_loop:
+002F2B  2  BD AD 3D     	lda scr_base+$100,x	; Get background character
+002F2E  2  09 80        	ora #$80		; Mark as changed
+002F30  2  9D 2D 3F     	sta scr_current+$100,x	; Copy into current screen
+002F33  2  E8           	inx
+002F34  2  10 F5        	bpl x2_loop
+002F36  2               
+002F36  2  60           	rts
+002F37  2               
+002F37  2               ;--------------------------------------------------------------------------
+002F37  2               ; Insert pipes
+002F37  2               ;
+002F37  2               ; Every 64 frames, a new pipe must be plotted on the left screenborder
+002F37  2               ;--------------------------------------------------------------------------
+002F37  2               
+002F37  2               insert_pipes:
+002F37  2  20 1A 35     	jsr get_random		; Get random nr 0-3
+002F3A  2  29 03        	and #3
+002F3C  2               
+002F3C  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002F3C  2               	; Insert new pipe
+002F3C  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002F3C  2               
+002F3C  2  AA           	tax			; Point to initial pipe display
+002F3D  2               
+002F3D  2  BD 92 2F     	lda pipeline0,x
+002F40  2  8D 4C 3E     	sta scr_current+0*columns+31	; Pos 31,0
+002F43  2               
+002F43  2  BD 96 2F     	lda pipeline1,x
+002F46  2  F0 03        	beq pipe2
+002F48  2  8D 6C 3E     	sta scr_current+1*columns+31	; Pos 31,1
+002F4B  2               pipe2:
+002F4B  2  BD 9A 2F     	lda pipeline2,x
+002F4E  2  F0 03        	beq pipe3
+002F50  2  8D 8C 3E     	sta scr_current+2*columns+31	; Pos 31,2
+002F53  2               pipe3:
+002F53  2  BD 9E 2F     	lda pipeline3,x
+002F56  2  F0 03        	beq pipe4
+002F58  2  8D AC 3E     	sta scr_current+3*columns+31	; Pos 31,3
+002F5B  2               pipe4:
+002F5B  2  BD A2 2F     	lda pipeline4,x
+002F5E  2  F0 03        	beq pipe5
+002F60  2  8D CC 3E     	sta scr_current+4*columns+31	; Pos 31,4
+002F63  2               pipe5:
+002F63  2  BD A6 2F     	lda pipeline5,x
+002F66  2  F0 03        	beq pipe6
+002F68  2  8D EC 3E     	sta scr_current+5*columns+31	; Pos 31,5
+002F6B  2               pipe6:
+002F6B  2  BD AA 2F     	lda pipeline6,x
+002F6E  2  F0 03        	beq pipe7
+002F70  2  8D 0C 3F     	sta scr_current+6*columns+31	; Pos 31,6
+002F73  2               pipe7:
+002F73  2  BD AE 2F     	lda pipeline7,x
+002F76  2  F0 03        	beq pipe8
+002F78  2  8D 2C 3F     	sta scr_current+7*columns+31	; Pos 31,7
+002F7B  2               pipe8:
+002F7B  2  BD B2 2F     	lda pipeline8,x
+002F7E  2  F0 03        	beq pipe9
+002F80  2  8D 4C 3F     	sta scr_current+8*columns+31	; Pos 31,8
+002F83  2               pipe9:
+002F83  2  BD B6 2F     	lda pipeline9,x
+002F86  2  F0 03        	beq pipe10
+002F88  2  8D 6C 3F     	sta scr_current+9*columns+31	; Pos 31,9
+002F8B  2               pipe10:
+002F8B  2  BD BA 2F     	lda pipeline10,x
+002F8E  2  8D 8C 3F     	sta scr_current+10*columns+31	; Pos 31,10
+002F91  2               
+002F91  2  60           	rts
+002F92  2               
+002F92  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002F92  2               ; Storage initial pipe display, marked as changed
+002F92  2               ;    0     = Nothing
+002F92  2               ;   40+$80 = Char top pipe marked as changed
+002F92  2               ;   68+$80 = Char body pipe marked as changed
+002F92  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002F92  2               
+002F92  2  A8 C4 C4 C4  pipeline0:	.byte 40+$80,68+$80,68+$80,68+$80
+002F96  2  00 A8 C4 C4  pipeline1:	.byte      0,40+$80,68+$80,68+$80
+002F9A  2  00 00 A8 C4  pipeline2:	.byte      0,     0,40+$80,68+$80
+002F9E  2  00 00 00 A8  pipeline3:	.byte      0,     0,     0,40+$80
+002FA2  2  00 00 00 00  pipeline4:	.byte      0,     0,     0,     0
+002FA6  2  00 00 00 00  pipeline5:	.byte      0,     0,     0,     0
+002FAA  2  00 00 00 00  pipeline6:	.byte      0,     0,     0,     0
+002FAE  2  A8 00 00 00  pipeline7:	.byte 40+$80,     0,     0,     0
+002FB2  2  C4 A8 00 00  pipeline8:	.byte 68+$80,40+$80,     0,     0
+002FB6  2  C4 C4 A8 00  pipeline9:	.byte 68+$80,68+$80,40+$80,     0
+002FBA  2  C4 C4 C4 A8  pipeline10:	.byte 68+$80,68+$80,68+$80,40+$80
+002FBE  2               
+002FBE  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002FBE  2               ; Storage hit positions Flappy for top-/bottom frames:
+002FBE  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+002FBE  2               
+002FBE  2  08 10 18 20  hit_top:	.byte 8,16,24,32
+002FC2  2  30 38 40 48  hit_bot:	.byte 48,56,64,72
+002FC6  2               
+002FC6  2               ;--------------------------------------------------------------------------
+002FC6  2               ; Plot changed characters in update screen array
+002FC6  2               ;
+002FC6  2               ; - Loop trough current screen array
+002FC6  2               ; -   Plot every char which is changed (bit7=set)
+002FC6  2               ; -   Reset bit7 to unchanged (bit7=unset)
+002FC6  2               ; - Repeat loop
+002FC6  2               ;
+002FC6  2               ; Timing: 2 + 12*(24 + 32*(19+198)+2 + 6) + 6 
+002FC6  2               ;         row: 6946
+002FC6  2               ;         tot: 83720 usec
+002FC6  2               ;--------------------------------------------------------------------------
+002FC6  2               
+002FC6  2               update_scr:
+002FC6  2  A2 00        	ldx #0			;2 Loop y counter
+002FC8  2               x5_loop:
+002FC8  2  BD 28 30     	lda scrcur_addr_lb,x	;4 Set scr_current pointer
+002FCB  2  8D DD 2F     	sta x6_loop+1		;4
+002FCE  2  8D E7 2F     	sta updptr+1		;4
+002FD1  2  BD 34 30     	lda scrcur_addr_hb,x	;4 Set scr_current pointer
+002FD4  2  8D DE 2F     	sta x6_loop+2		;4
+002FD7  2  8D E8 2F     	sta updptr+2		;4
+002FDA  2               
+002FDA  2  A0 00        	ldy #0			;2 Loop x counter
+002FDC  2               x6_loop:
+002FDC  2  B9 FF FF     	lda $ffff,y		;4
+002FDF  2  10 08        	bpl no_update		;2 Skip if character is not changed
+002FE1  2  29 7F        	and #$7f		;2 Reset changed bit
+002FE3  2  20 24 33     	jsr plot_tile		;198 Plot char
+002FE6  2               updptr:
+002FE6  2  99 FF FF     	sta $ffff,y		;5 Mark char in current screen array as unchanged
+002FE9  2               no_update:
+002FE9  2  C8           	iny			;2
+002FEA  2  C0 20        	cpy #columns		;2
+002FEC  2  D0 EE        	bne x6_loop		;2 Repeat x
+002FEE  2               
+002FEE  2  E8           	inx			;2
+002FEF  2  E0 0C        	cpx #rows		;2
+002FF1  2  D0 D5        	bne x5_loop		;2 Repeat y
+002FF3  2               
+002FF3  2  60           	rts			;6
+002FF4  2               
+002FF4  2               ;--------------------------------------------------------------------------
+002FF4  2               ; Animate characters from current screen
+002FF4  2               ;
+002FF4  2               ; - Loop trough current screen array
+002FF4  2               ; -   Get character value
+002FF4  2               ; -   Read address corresponding animation routine
+002FF4  2               ; -   Jump animation subroutine
+002FF4  2               ; - Repeat loop
+002FF4  2               ;--------------------------------------------------------------------------
+002FF4  2               
+002FF4  2               animate_scr:
+002FF4  2  A2 00        	ldx #0			; y counter
+002FF6  2               x7_loop:
+002FF6  2  BD 28 30     	lda scrcur_addr_lb,x	; Set scr_current pointer
+002FF9  2  85 82        	sta addr_ptr2
+002FFB  2  BD 34 30     	lda scrcur_addr_hb,x	; Set scr_current pointer
+002FFE  2  85 83        	sta addr_ptr2+1
+003000  2               
+003000  2  A0 00        	ldy #0			; x counter
+003002  2               x8_loop:
+003002  2  84 8B        	sty tmp_y		; Save y
+003004  2  B1 82        	lda (addr_ptr2),y	; Read char number
+003006  2  A8           	tay
+003007  2  B9 2D 40     	lda ani_table_hb,y	; Get hb animation routine
+00300A  2  85 89        	sta jmp_addr+1
+00300C  2  30 0A        	bmi no_update2
+00300E  2  B9 AD 3F     	lda ani_table_lb,y	; Get lb animation routine
+003011  2  85 88        	sta jmp_addr
+003013  2               
+003013  2  A4 8B        	ldy tmp_y		; Restore y
+003015  2  20 25 30     	jsr animate		; Execute action
+003018  2               
+003018  2               no_update2:
+003018  2  A4 8B        	ldy tmp_y
+00301A  2  C8           	iny
+00301B  2  C0 20        	cpy #columns
+00301D  2  D0 E3        	bne x8_loop		; Repeat x
+00301F  2               
+00301F  2  E8           	inx
+003020  2  E0 0C        	cpx #rows
+003022  2  D0 D2        	bne x7_loop		; Repeat y
+003024  2               
+003024  2  60           	rts
+003025  2               
+003025  2               animate:
+003025  2  6C 88 00     	jmp (jmp_addr)		; Jump to animation routine
+003028  2               
+003028  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003028  2               ; Current screen row address table
+003028  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003028  2               
+003028  2               scrcur_addr_lb:
+003028  2  2D 4D        	.byte <scr_current,<(scr_current+1*columns)
+00302A  2  6D 8D        	.byte <(scr_current+2*columns),<(scr_current+3*columns)
+00302C  2  AD CD        	.byte <(scr_current+4*columns),<(scr_current+5*columns)
+00302E  2  ED 0D        	.byte <(scr_current+6*columns),<(scr_current+7*columns)
+003030  2  2D 4D        	.byte <(scr_current+8*columns),<(scr_current+9*columns)
+003032  2  6D 8D        	.byte <(scr_current+10*columns),<(scr_current+11*columns)
+003034  2               scrcur_addr_hb:
+003034  2  3E 3E        	.byte >scr_current,>(scr_current+1*columns)
+003036  2  3E 3E        	.byte >(scr_current+2*columns),>(scr_current+3*columns)
+003038  2  3E 3E        	.byte >(scr_current+4*columns),>(scr_current+5*columns)
+00303A  2  3E 3F        	.byte >(scr_current+6*columns),>(scr_current+7*columns)
+00303C  2  3F 3F        	.byte >(scr_current+8*columns),>(scr_current+9*columns)
+00303E  2  3F 3F        	.byte >(scr_current+10*columns),>(scr_current+11*columns)
+003040  2               
+003040  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003040  2               ; Current background screen row address table
+003040  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003040  2               
+003040  2               scrbase_addr_lb:
+003040  2  AD CD        	.byte <scr_base,<(scr_base+1*columns)
+003042  2  ED 0D        	.byte <(scr_base+2*columns),<(scr_base+3*columns)
+003044  2  2D 4D        	.byte <(scr_base+4*columns),<(scr_base+5*columns)
+003046  2  6D 8D        	.byte <(scr_base+6*columns),<(scr_base+7*columns)
+003048  2  AD CD        	.byte <(scr_base+8*columns),<(scr_base+9*columns)
+00304A  2  ED 0D        	.byte <(scr_base+10*columns),<(scr_base+11*columns)
+00304C  2               scrbase_addr_hb:
+00304C  2  3C 3C        	.byte >scr_base,>(scr_base+1*columns)
+00304E  2  3C 3D        	.byte >(scr_base+2*columns),>(scr_base+3*columns)
+003050  2  3D 3D        	.byte >(scr_base+4*columns),>(scr_base+5*columns)
+003052  2  3D 3D        	.byte >(scr_base+6*columns),>(scr_base+7*columns)
+003054  2  3D 3D        	.byte >(scr_base+8*columns),>(scr_base+9*columns)
+003056  2  3D 3E        	.byte >(scr_base+10*columns),>(scr_base+11*columns)
+003058  2               
+003058  2               ;--------------------------------------------------------------------------
+003058  2               ; Animation routines
+003058  2               ;
+003058  2               ; - Read address animation routine from animation table
+003058  2               ; - Execute animation routine
+003058  2               ;--------------------------------------------------------------------------
+003058  2               
+003058  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003058  2               ; Bottom bar pixel shift
+003058  2               ; Change char 0->1, 1->2 ... 6->7 and 7->0
+003058  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003058  2               
+003058  2               ani0:				; Shift character 1 bit left in byte, cycle=8 chars
+003058  2  B1 82        	lda (addr_ptr2),y	; Get screen character
+00305A  2  18           	clc
+00305B  2  69 01        	adc #1
+00305D  2  29 07        	and #7			; Add 1 and mask only 8 sprites
+00305F  2  09 80        	ora #$80		; Mark as changed
+003061  2  91 82        	sta (addr_ptr2),y	; Set screen character
+003063  2  60           	rts
+003064  2               
+003064  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003064  2               ; Pipe top and body pixel shift
+003064  2               ; Change char 40->41, 41->42 ... and 66->67
+003064  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003064  2               
+003064  2               ani1:				; Shift character 1 bit left in byte, cycle=28 chars
+003064  2  B1 82        	lda (addr_ptr2),y	; Get screen character
+003066  2  18           	clc
+003067  2  69 01        	adc #1
+003069  2  C9 44        	cmp #68			; Add 1 and mask only 28 sprites
+00306B  2  D0 02        	bne no_reset
+00306D  2  A9 28        	lda #40			; Set start pipe char
+00306F  2               no_reset:
+00306F  2  09 80        	ora #$80		; Mark as changed
+003071  2  91 82        	sta (addr_ptr2),y	; Get screen character
+003073  2  60           	rts
+003074  2               
+003074  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003074  2               ; Pipe top and body shifting out of byte boundry
+003074  2               ; Pixel overflow left byte boundry, copy pipe chars 1 byte to the left
+003074  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003074  2               
+003074  2               ani2:				; Shift character to previous character
+003074  2  C0 00        	cpy #0			; Do nothing at left border screen
+003076  2  F0 12        	beq end_ani2
+003078  2               
+003078  2  B1 82        	lda (addr_ptr2),y	; Get pipe left front char
+00307A  2  38           	sec
+00307B  2  E9 03        	sbc #3			; Decrement by 3
+00307D  2  88           	dey
+00307E  2  09 80        	ora #$80		; Mark as changed
+003080  2  91 82        	sta (addr_ptr2),y	; Set char 1 byte to left on screen
+003082  2               
+003082  2  C8           	iny
+003083  2  18           	clc
+003084  2  69 04        	adc #4			; Add 4 to previous char
+003086  2  09 80        	ora #$80		; Mark as changed
+003088  2  91 82        	sta (addr_ptr2),y	; Set char on previous screen pos
+00308A  2               end_ani2:
+00308A  2  60           	rts
+00308B  2               
+00308B  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+00308B  2               ; Pipe top and body restoring background after last byte
+00308B  2               ; Pixel overflow right byte boundry, restore background
+00308B  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+00308B  2               
+00308B  2               ani3:
+00308B  2  C0 00        	cpy #0			; Do nothing at left border screen
+00308D  2  F0 0B        	beq end_ani3
+00308F  2               
+00308F  2  B1 82        	lda (addr_ptr2),y	; Get pipe left front char
+003091  2  38           	sec
+003092  2  E9 03        	sbc #3			; Decrement by 3
+003094  2  88           	dey
+003095  2  09 80        	ora #$80		; Mark as changed
+003097  2  91 82        	sta (addr_ptr2),y	; Set char 1 byte to left on screen
+003099  2               
+003099  2  C8           	iny
+00309A  2               end_ani3:
+00309A  2  BD 40 30     	lda scrbase_addr_lb,x	; Set scr_current pointer
+00309D  2  85 84        	sta addr_ptr3
+00309F  2  BD 4C 30     	lda scrbase_addr_hb,x
+0030A2  2  85 85        	sta addr_ptr3+1
+0030A4  2  B1 84        	lda (addr_ptr3),y	; Get background char
+0030A6  2  09 80        	ora #$80		; Mark as changed
+0030A8  2  91 82        	sta (addr_ptr2),y	; Set char on previous screen pos
+0030AA  2  60           	rts
+0030AB  2               
+0030AB  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0030AB  2               ; Flappy animation
+0030AB  2               ; Change char 0->1, 1->2 2-3 and 3->0
+0030AB  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0030AB  2               
+0030AB  2               ani4:
+0030AB  2  A5 8C        	lda counter		; Animate flappy once every 2 frames
+0030AD  2  29 01        	and #1
+0030AF  2  F0 15        	beq end_ani4
+0030B1  2               
+0030B1  2  B1 82        	lda (addr_ptr2),y	; Rotate Flappy tilenr bit0/1 -> 0-1-2-3-0-1-2-....
+0030B3  2  29 FC        	and #$fc
+0030B5  2  8D C8 30     	sta tmp_nr
+0030B8  2  B1 82        	lda (addr_ptr2),y
+0030BA  2  18           	clc
+0030BB  2  69 01        	adc #1
+0030BD  2  29 03        	and #3
+0030BF  2  6D C8 30     	adc tmp_nr
+0030C2  2  09 80        	ora #$80		; Mark as changed
+0030C4  2  91 82        	sta (addr_ptr2),y
+0030C6  2               end_ani4:
+0030C6  2  60           	rts
+0030C7  2               
+0030C7  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0030C7  2               ; Dummy entry 
+0030C7  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0030C7  2               
+0030C7  2               no_ani:
+0030C7  2  60           	rts		;	= $ffff
+0030C8  2               
+0030C8  2  00           tmp_nr:	.byte 0
+0030C9  2               
+0030C9  2               ;--------------------------------------------------------------------------
+0030C9  2               ; Add scoreboard to current screen to be displayed
+0030C9  2               ; At pos 7,3 width a width of 18 and height of 5
+0030C9  2               ;
+0030C9  2               ; Top border: 119-120-121
+0030C9  2               ; Middle    : 122-123-124
+0030C9  2               ; Bottom    : 125-126-127
+0030C9  2               ;--------------------------------------------------------------------------
+0030C9  2               
+0030C9  2               add_scoreboard:
+0030C9  2  A9 F7        	lda #119+$80		; Left top
+0030CB  2  8D 94 3E     	sta scr_current+7+3*32
+0030CE  2               
+0030CE  2  A9 FA        	lda #122+$80		; Left
+0030D0  2  8D B4 3E     	sta scr_current+7+4*32
+0030D3  2  8D D4 3E     	sta scr_current+7+5*32
+0030D6  2  8D F4 3E     	sta scr_current+7+6*32
+0030D9  2               
+0030D9  2  A9 FD        	lda #125+$80		; Left bottom
+0030DB  2  8D 14 3F     	sta scr_current+7+7*32
+0030DE  2               
+0030DE  2  A2 08        	ldx #8
+0030E0  2               top_loop:
+0030E0  2  A9 F8        	lda #120+$80
+0030E2  2  9D 8D 3E     	sta scr_current+3*32,x	; Top middle
+0030E5  2  A9 FB        	lda #123+$80
+0030E7  2  9D AD 3E     	sta scr_current+4*32,x	; Middle
+0030EA  2  9D CD 3E     	sta scr_current+5*32,x
+0030ED  2  9D ED 3E     	sta scr_current+6*32,x
+0030F0  2  A9 FE        	lda #126+$80
+0030F2  2  9D 0D 3F     	sta scr_current+7*32,x	; Bottom middle
+0030F5  2  E8           	inx
+0030F6  2  E0 18        	cpx #24
+0030F8  2  D0 E6        	bne top_loop
+0030FA  2               
+0030FA  2  A9 F9        	lda #121+$80		; Top right
+0030FC  2  8D A5 3E     	sta scr_current+24+3*32
+0030FF  2               
+0030FF  2  A9 FC        	lda #124+$80
+003101  2  8D C5 3E     	sta scr_current+24+4*32	; Right
+003104  2  8D E5 3E     	sta scr_current+24+5*32
+003107  2  8D 05 3F     	sta scr_current+24+6*32
+00310A  2               
+00310A  2  A9 FF        	lda #127+$80
+00310C  2  8D 25 3F     	sta scr_current+24+7*32	; Bottom right
+00310F  2               
+00310F  2  60           	rts
+003110  2               
+003110  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003110  2               ; Scoreboard text
+003110  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003110  2               
+003110  2  C8 83 53 43  txt_score:	.byte <$83c8,>$83c8,"SCORE",13
+003114  2  4F 52 45 0D  
+003118  2  48 85 42 45  txt_best:	.byte <$8548,>$8548,"BEST",13
+00311C  2  53 54 0D     
+00311F  2  E8 86 52 41  txt_rank:	.byte <$86e8,>$86e8,"RANK",13
+003123  2  4E 4B 0D     
+003126  2  D6 83 30 30  txt_cscore:	.byte <$83d6,>$83d6,"00",13
+00312A  2  0D           
+00312B  2  56 85 30 30  txt_hi_cscore:	.byte <$8556,>$8556,"00",13
+00312F  2  0D           
+003130  2               
+003130  2               rank_pos	= $86f0
+003130  2               
+003130  2  F0 86 20 20  txt_rank0:	.byte <rank_pos,>rank_pos,"  FAFFY.",13
+003134  2  46 41 46 46  
+003138  2  59 2E 0D     
+00313B  2  F0 86 20 20  txt_rank1:	.byte <rank_pos,>rank_pos,"  GOOFY.",13
+00313F  2  47 4F 4F 46  
+003143  2  59 2E 0D     
+003146  2  F0 86 20 44  txt_rank2:	.byte <rank_pos,>rank_pos," DROOPY.",13
+00314A  2  52 4F 4F 50  
+00314E  2  59 2E 0D     
+003151  2  F0 86 41 56  txt_rank3:	.byte <rank_pos,>rank_pos,"AVERAGE.",13
+003155  2  45 52 41 47  
+003159  2  45 2E 0D     
+00315C  2  F0 86 20 20  txt_rank4:	.byte <rank_pos,>rank_pos,"  SUPER.",13
+003160  2  53 55 50 45  
+003164  2  52 2E 0D     
+003167  2  F0 86 20 20  txt_rank5:	.byte <rank_pos,>rank_pos,"   HERO.",13
+00316B  2  20 48 45 52  
+00316F  2  4F 2E 0D     
+003172  2  F0 86 20 20  txt_rank6:	.byte <rank_pos,>rank_pos,"   ICON.",13
+003176  2  20 49 43 4F  
+00317A  2  4E 2E 0D     
+00317D  2  F0 86 20 20  txt_rank7:	.byte <rank_pos,>rank_pos,"   KING.",13
+003181  2  20 4B 49 4E  
+003185  2  47 2E 0D     
+003188  2  F0 86 45 4D  txt_rank8:	.byte <rank_pos,>rank_pos,"EMPEROR.",13
+00318C  2  50 45 52 4F  
+003190  2  52 2E 0D     
+003193  2  F0 86 20 20  txt_rank9:	.byte <rank_pos,>rank_pos,"    GOD.",13
+003197  2  20 20 47 4F  
+00319B  2  44 2E 0D     
+00319E  2               
+00319E  2  30 3B 46 51  rank_lb:	.byte <txt_rank0,<txt_rank1,<txt_rank2,<txt_rank3
+0031A2  2  5C 67 72 7D  		.byte <txt_rank4,<txt_rank5,<txt_rank6,<txt_rank7
+0031A6  2  88 93        		.byte <txt_rank8,<txt_rank9
+0031A8  2               
+0031A8  2  31 31 31 31  rank_hb:	.byte >txt_rank0,>txt_rank1,>txt_rank2,>txt_rank3
+0031AC  2  31 31 31 31  		.byte >txt_rank4,>txt_rank5,>txt_rank6,>txt_rank7
+0031B0  2  31 31        		.byte >txt_rank8,>txt_rank9
+0031B2  2               
+0031B2  2               ;--------------------------------------------------------------------------
+0031B2  2               ; Display Flappy Bird and update coordinates (startposition y=36, $84c0)
+0031B2  2               ;
+0031B2  2               ; - Copy background back to current position Flappy on screen
+0031B2  2               ; - Copy new position Flappy from screen to background
+0031B2  2               ; - Plot Flappy Bird
+0031B2  2               ;--------------------------------------------------------------------------
+0031B2  2               
+0031B2  2               flappy_scr:
+0031B2  2  20 A6 32     	jsr calc_flappy_pos	; Calculate screen address
+0031B5  2               
+0031B5  2  20 6B FE     	jsr os_wait_sync	; Wait for vsync
+0031B8  2               
+0031B8  2  A2 00        	ldx #0
+0031BA  2               flappy_loop1:
+0031BA  2  BC 56 33     	ldy scrtab,x
+0031BD  2  BD 66 32     	lda flappy_bg_buffer,x	; Remove Flapppy top chars
+0031C0  2  91 80        	sta (addr_ptr),y
+0031C2  2  E8           	inx
+0031C3  2  E0 20        	cpx #32
+0031C5  2  D0 F3        	bne flappy_loop1
+0031C7  2  E6 81        	inc addr_ptr+1
+0031C9  2               flappy_loop2:
+0031C9  2  BC 36 33     	ldy scrtab-32,x
+0031CC  2  BD 66 32     	lda flappy_bg_buffer,x	; Remove Flappy bottom chars
+0031CF  2  91 80        	sta (addr_ptr),y
+0031D1  2  E8           	inx
+0031D2  2  E0 40        	cpx #64
+0031D4  2  D0 F3        	bne flappy_loop2
+0031D6  2               
+0031D6  2  24 95        	bit key_pressed		; If key pressed speed = -upward_speed
+0031D8  2  10 0D        	bpl not_pressed
+0031DA  2  A9 06        	lda #flappy_upwards
+0031DC  2  49 FF        	eor #$ff
+0031DE  2  18           	clc
+0031DF  2  69 01        	adc #1
+0031E1  2  85 94        	sta flappy_speed
+0031E3  2  A9 00        	lda #0
+0031E5  2  85 95        	sta key_pressed
+0031E7  2               
+0031E7  2               not_pressed:
+0031E7  2  18           	clc			; speed = speed + gravity
+0031E8  2  A5 94        	lda flappy_speed
+0031EA  2  69 01        	adc #flappy_gravity
+0031EC  2  85 94        	sta flappy_speed
+0031EE  2               
+0031EE  2  18           	clc			; sprite_y = sprite_y + speed
+0031EF  2  65 93        	adc flappy_y
+0031F1  2  85 93        	sta flappy_y
+0031F3  2               
+0031F3  2  10 07        	bpl chk_bottom
+0031F5  2  A9 00        	lda #0			; speed=0
+0031F7  2  85 94        	sta flappy_speed
+0031F9  2  4C 06 32     	jmp not_on_bottom
+0031FC  2               
+0031FC  2               chk_bottom:
+0031FC  2  C9 4C        	cmp #flappy_max		; If sprite_y > max
+0031FE  2  90 06        	bcc not_on_bottom
+003200  2  A9 00        	lda #0			;  speed=0
+003202  2  85 94        	sta flappy_speed
+003204  2               entry_death:
+003204  2  A9 4C        	lda #flappy_max		;  flappy_y = max
+003206  2               
+003206  2               not_on_bottom:
+003206  2  85 93        	sta flappy_y		; Set Flappy-y
+003208  2               
+003208  2               skip_frame:
+003208  2  20 D2 32     	jsr backup_back		; Restore background
+00320B  2               	
+00320B  2  A2 04        	ldx #4			; If Flappy death, sprite=4
+00320D  2  A5 9A        	lda death_flag
+00320F  2  D0 06        	bne flappy_death
+003211  2               
+003211  2  A5 8C        	lda counter		; Determine flying Flappy sprite
+003213  2  4A           	lsr a
+003214  2  29 03        	and #3
+003216  2  AA           	tax
+003217  2               
+003217  2               flappy_death:
+003217  2  BD 99 3A     	lda flappy_ani_lb,x	; Set sprite data address
+00321A  2  8D 48 32     	sta fl_addr1+1
+00321D  2  8D 5C 32     	sta fl_addr2+1
+003220  2  BD 9E 3A     	lda flappy_ani_hb,x
+003223  2  8D 49 32     	sta fl_addr1+2
+003226  2  8D 5D 32     	sta fl_addr2+2
+003229  2               
+003229  2  BD A3 3B     	lda flappy_msk_lb,x	; Set sprite mask address
+00322C  2  8D 45 32     	sta fl_mask1+1
+00322F  2  8D 59 32     	sta fl_mask2+1
+003232  2  BD A8 3B     	lda flappy_msk_hb,x
+003235  2  8D 46 32     	sta fl_mask1+2
+003238  2  8D 5A 32     	sta fl_mask2+2
+00323B  2               
+00323B  2  C6 81        	dec addr_ptr+1		; Adjust Hi-byte screen address
+00323D  2               
+00323D  2  A2 00        	ldx #0
+00323F  2               flappy_loop5:			; Upper half Flappy
+00323F  2  BC 56 33     	ldy scrtab,x
+003242  2  B1 80        	lda (addr_ptr),y	; Get screen data
+003244  2               fl_mask1:
+003244  2  3D A3 3A     	and fma96,x		; Mask screen data
+003247  2               fl_addr1:
+003247  2  1D 37 38     	ora ch96,x		; Add Flapppy data
+00324A  2  91 80        	sta (addr_ptr),y	; Display data on screen
+00324C  2  E8           	inx
+00324D  2  E0 20        	cpx #32
+00324F  2  D0 EE        	bne flappy_loop5
+003251  2               
+003251  2  E6 81        	inc addr_ptr+1		; Adjust Hi-byte screen address
+003253  2               
+003253  2               flappy_loop6:			; Lower half Flappy
+003253  2  BC 36 33     	ldy scrtab-32,x
+003256  2  B1 80        	lda (addr_ptr),y	; Get screen data
+003258  2               fl_mask2:
+003258  2  3D A3 3A     	and fma96,x		; Mask screen data
+00325B  2               fl_addr2:
+00325B  2  1D 37 38     	ora ch96,x		; Add Flapppy data
+00325E  2  91 80        	sta (addr_ptr),y	; Display data on screen
+003260  2  E8           	inx
+003261  2  E0 40        	cpx #64
+003263  2  D0 EE        	bne flappy_loop6
+003265  2               
+003265  2  60           	rts
+003266  2               
+003266  2               flappy_bg_buffer:		; Backup background flappy
+003266  2  00 00 00 00  	.byte 0,0,0,0,0,0,0,0
+00326A  2  00 00 00 00  
+00326E  2  00 00 00 00  	.byte 0,0,0,0,0,0,0,0
+003272  2  00 00 00 00  
+003276  2  00 00 00 00  	.byte 0,0,0,0,0,0,0,0
+00327A  2  00 00 00 00  
+00327E  2  00 00 00 00  	.byte 0,0,0,0,0,0,0,0
+003282  2  00 00 00 00  
+003286  2  00 00 00 00  	.byte 0,0,0,0,0,0,0,0
+00328A  2  00 00 00 00  
+00328E  2  00 00 00 00  	.byte 0,0,0,0,0,0,0,0
+003292  2  00 00 00 00  
+003296  2  00 00 00 00  	.byte 0,0,0,0,0,0,0,0
+00329A  2  00 00 00 00  
+00329E  2  00 00 00 00  	.byte 0,0,0,0,0,0,0,0
+0032A2  2  00 00 00 00  
+0032A6  2               
+0032A6  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0032A6  2               ; Calculate screen address from flappy y-coordinate
+0032A6  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0032A6  2               
+0032A6  2               calc_flappy_pos:
+0032A6  2  A5 93        	lda flappy_y		; Calculate screenaddress Flappy top chars
+0032A8  2  4A           	lsr a
+0032A9  2  4A           	lsr a
+0032AA  2  4A           	lsr a
+0032AB  2  09 80        	ora #$80
+0032AD  2  85 81        	sta addr_ptr+1
+0032AF  2  A5 93        	lda flappy_y
+0032B1  2  29 07        	and #7
+0032B3  2  AA           	tax
+0032B4  2  18           	clc
+0032B5  2  BD 56 33     	lda scrtab,x
+0032B8  2  65 9B        	adc flappy_xpos
+0032BA  2  85 80        	sta addr_ptr
+0032BC  2  D0 02        	bne no_boundry
+0032BE  2  E6 81        	inc addr_ptr+1
+0032C0  2               no_boundry:
+0032C0  2  60           	rts
+0032C1  2               
+0032C1  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0032C1  2               ; Reset flappy initial y coordinate and clear buffer
+0032C1  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0032C1  2               
+0032C1  2               reset_flappy:
+0032C1  2               
+0032C1  2  A9 26        	lda #38
+0032C3  2  85 93        	sta flappy_y		; Initial Flappy y-position
+0032C5  2  A9 00        	lda #0
+0032C7  2  85 94        	sta flappy_speed	; Flappy acceleration speed
+0032C9  2               
+0032C9  2  A2 3F        	ldx #63			; Clear background buffer flappy
+0032CB  2               clear_buffer:
+0032CB  2  9D 66 32     	sta flappy_bg_buffer,x
+0032CE  2  CA           	dex
+0032CF  2  10 FA        	bpl clear_buffer
+0032D1  2  60           	rts
+0032D2  2               
+0032D2  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0032D2  2               ; Backup background into buffer
+0032D2  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0032D2  2               
+0032D2  2               backup_back:
+0032D2  2  20 A6 32     	jsr calc_flappy_pos	; Calculate Flappy screen address
+0032D5  2               
+0032D5  2  A2 00        	ldx #0
+0032D7  2               flappy_loop3:
+0032D7  2  BC 56 33     	ldy scrtab,x
+0032DA  2  B1 80        	lda (addr_ptr),y	; Backup screen Flapppy top half
+0032DC  2  9D 66 32     	sta flappy_bg_buffer,x
+0032DF  2  E8           	inx
+0032E0  2  E0 20        	cpx #32
+0032E2  2  D0 F3        	bne flappy_loop3
+0032E4  2  E6 81        	inc addr_ptr+1
+0032E6  2               flappy_loop4:
+0032E6  2  BC 36 33     	ldy scrtab-32,x
+0032E9  2  B1 80        	lda (addr_ptr),y	; Backup screen Flappy bottom half
+0032EB  2  9D 66 32     	sta flappy_bg_buffer,x
+0032EE  2  E8           	inx
+0032EF  2  E0 40        	cpx #64
+0032F1  2  D0 F3        	bne flappy_loop4
+0032F3  2               
+0032F3  2  60           	rts
+0032F4  2               
+0032F4  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0032F4  2               ; Check if Flappy hits pipes
+0032F4  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0032F4  2               
+0032F4  2               chk_flappy_hit:
+0032F4  2  A9 00        	lda #0			; Reset hitflag
+0032F6  2  85 97        	sta hit_flag
+0032F8  2               
+0032F8  2  A6 93        	ldx flappy_y		; Get Flappy y-pos
+0032FA  2               
+0032FA  2  A5 94        	lda flappy_speed	; Check if flappy is going up or down
+0032FC  2  30 05        	bmi flappy_up		; Checkpoint is top Flappy sprite
+0032FE  2               flappy_down:
+0032FE  2  8A           	txa			; Checkpoint is bottom Flappy sprite
+0032FF  2  18           	clc
+003300  2  69 0C        	adc #12
+003302  2  AA           	tax
+003303  2               flappy_up:
+003303  2  8A           	txa			; Calculate row in current screen array
+003304  2  4A           	lsr a
+003305  2  4A           	lsr a
+003306  2  4A           	lsr a
+003307  2  AA           	tax
+003308  2               
+003308  2  BD 28 30     	lda scrcur_addr_lb,X	; Set current screen array address
+00330B  2  85 80        	sta addr_ptr
+00330D  2  BD 34 30     	lda scrcur_addr_hb,x
+003310  2  85 81        	sta addr_ptr+1
+003312  2               
+003312  2  A0 02        	ldy #2
+003314  2               chk_hit:
+003314  2  B1 80        	lda (addr_ptr),y	; Get current screen tile
+003316  2  C9 29        	cmp #41			; Check if tilenr is >40 (pipe)
+003318  2  90 02        	bcc no_hit
+00331A  2  E6 97        	inc hit_flag		; Flappy hit pipe, set hitflag
+00331C  2               no_hit:
+00331C  2  C8           	iny
+00331D  2  C0 06        	cpy #6			; Flappy is 4 bytes wide, check all tiles
+00331F  2  D0 F3        	bne chk_hit
+003321  2               
+003321  2  A5 97        	lda hit_flag		; Return with hitflag
+003323  2  60           	rts
+003324  2               
+003324  2               ;--------------------------------------------------------------------------
+003324  2               ; Plot character
+003324  2               ;
+003324  2               ; - Plot char A at Y,X
+003324  2               ;     A = character
+003324  2               ;     Y = X-coordinate !!!!!!
+003324  2               ;     X = Y-coordinate !!!!!!
+003324  2               ;
+003324  2               ; Timing: 44 + 17*8+2 + 16 = 198 usec/char
+003324  2               ;--------------------------------------------------------------------------
+003324  2               
+003324  2               plot_tile:
+003324  2  86 9C        	stx save_x		;3 Save x,y
+003326  2  84 9D        	sty save_y		;3
+003328  2  48           	pha			;3
+003329  2               
+003329  2  AA           	tax			;1 Get character data address
+00332A  2  BD AD 3B     	lda ch_lb,x		;4
+00332D  2  8D 45 33     	sta datplt+1		;4
+003330  2  BD 2D 3C     	lda ch_hb,x		;4
+003333  2  8D 46 33     	sta datplt+2		;4
+003336  2               
+003336  2  A6 9D        	ldx save_y		;3 Calculate screen address
+003338  2  8E 4B 33     	stx scrplt+1		;4
+00333B  2  A5 9C        	lda save_x		;3
+00333D  2  09 80        	ora #$80		;2
+00333F  2  8D 4C 33     	sta scrplt+2		;4
+003342  2               
+003342  2  A2 07        	ldx #7			;2 Row counter
+003344  2               loop:
+003344  2               datplt:
+003344  2  BD FF FF     	lda $ffff,x		;4 Get char data
+003347  2  BC 56 33     	ldy scrtab,x		;4
+00334A  2               scrplt:
+00334A  2  99 FF FF     	sta $ffff,y		;5 Plot byte on screen
+00334D  2  CA           	dex			;2
+00334E  2  10 F4        	bpl loop		;2 Repeat 8 rows
+003350  2               
+003350  2  68           	pla			;4
+003351  2  A4 9D        	ldy save_y		;3 Restore x,y
+003353  2  A6 9C        	ldx save_x		;3
+003355  2  60           	rts			;6
+003356  2               	
+003356  2               scrtab:
+003356  2  00 20 40 60  	.byte 0,$20,$40,$60,$80,$a0,$c0,$e0
+00335A  2  80 A0 C0 E0  
+00335E  2  01 21 41 61  	.byte 1,$21,$41,$61,$81,$a1,$c1,$e1
+003362  2  81 A1 C1 E1  
+003366  2  02 22 42 62  	.byte 2,$22,$42,$62,$82,$a2,$c2,$e2
+00336A  2  82 A2 C2 E2  
+00336E  2  03 23 43 63  	.byte 3,$23,$43,$63,$83,$a3,$c3,$e3
+003372  2  83 A3 C3 E3  
+003376  2               dataptr:
+003376  2  00 01 02 03  	.byte 0,1,2,3,4,5,6,7
+00337A  2  04 05 06 07  
+00337E  2               
+00337E  2               score:
+00337E  2  00 00 00     	.byte 0,0,0
+003381  2               hi_score:
+003381  2  00 00 00     	.byte 0,0,0
+003384  2               
+003384  2               ;--------------------------------------------------------------------------
+003384  2               ; Text scroller
+003384  2               ;--------------------------------------------------------------------------
+003384  2               
+003384  2               textscroller:
+003384  2  BD CA 33     	lda text0,x		; Get textscroll character
+003387  2  20 6A 34     	jsr plot_chr		; Put character on right border screen
+00338A  2               
+00338A  2  A0 00        	ldy #0			; Scroll all chars of scroller 1 to left
+00338C  2               scroll_line:
+00338C  2  B9 C1 86     	lda $86c1,y
+00338F  2  99 C0 86     	sta $86c0,y
+003392  2  B9 E1 86     	lda $86e1,y
+003395  2  99 E0 86     	sta $86e0,y
+003398  2  B9 01 87     	lda $8701,y
+00339B  2  99 00 87     	sta $8700,y
+00339E  2  B9 21 87     	lda $8721,y
+0033A1  2  99 20 87     	sta $8720,y
+0033A4  2  B9 41 87     	lda $8741,y
+0033A7  2  99 40 87     	sta $8740,y
+0033AA  2  B9 61 87     	lda $8761,y
+0033AD  2  99 60 87     	sta $8760,y
+0033B0  2  C8           	iny
+0033B1  2  C0 1F        	cpy #31
+0033B3  2  D0 D7        	bne scroll_line
+0033B5  2               
+0033B5  2  A9 00        	lda #0			; Erase character
+0033B7  2  8D DF 86     	sta $86df
+0033BA  2  8D FF 86     	sta $86ff
+0033BD  2  8D 1F 87     	sta $871f
+0033C0  2  8D 3F 87     	sta $873f
+0033C3  2  8D 5F 87     	sta $875f
+0033C6  2  8D 7F 87     	sta $877f
+0033C9  2               
+0033C9  2  60           	rts
+0033CA  2               
+0033CA  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0033CA  2               ; Text scroller for 8 lines of 32 chars
+0033CA  2               ;
+0033CA  2               ;              01234567890123456789012345678901
+0033CA  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0033CA  2               
+0033CA  2  20 20 20 20  text0:	.byte "      ATOMIC FLAPPY BIRD 2014   "
+0033CE  2  20 20 41 54  
+0033D2  2  4F 4D 49 43  
+0033EA  2  20 20 20 20  	.byte "     WRITTEN BY KC  BASED UPON  "
+0033EE  2  20 57 52 49  
+0033F2  2  54 54 45 4E  
+00340A  2  20 20 20 20  	.byte "     FLAGONBIRD FOR THE DRAGON  "
+00340E  2  20 46 4C 41  
+003412  2  47 4F 4E 42  
+00342A  2  20 20 20 20  	.byte "       WRITTEN BY BOSCO 2014    "
+00342E  2  20 20 20 57  
+003432  2  52 49 54 54  
+00344A  2  20 20 20 20  	.byte "       PRESS A KEY TO START     "
+00344E  2  20 20 20 50  
+003452  2  52 45 53 53  
+00346A  2               text1:
+00346A  2               	text_scroll_len=text1-text0
+00346A  2               
+00346A  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+00346A  2               ; Put character in right border on screen
+00346A  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+00346A  2               
+00346A  2               plot_chr:
+00346A  2  86 8A        	stx tmp_x
+00346C  2  84 8B        	sty tmp_y
+00346E  2               
+00346E  2  38           	sec			; Get characterdata address
+00346F  2  E9 20        	sbc #32
+003471  2  A8           	tay
+003472  2  B9 6C 4B     	lda font_lb,y
+003475  2  85 80        	sta addr_ptr
+003477  2  B9 AC 4B     	lda font_hb,y
+00347A  2  85 81        	sta addr_ptr+1
+00347C  2               
+00347C  2  A5 8E        	lda txt_x
+00347E  2  8D 94 34     	sta chr_addr+1
+003481  2  8D 97 34     	sta chr_addr+4
+003484  2  A5 8F        	lda txt_y
+003486  2  8D 95 34     	sta chr_addr+2
+003489  2  8D 98 34     	sta chr_addr+5
+00348C  2               
+00348C  2  A0 00        	ldy #0			; Display line0
+00348E  2               chr_loop:
+00348E  2  BE 56 33     	ldx scrtab,y
+003491  2  B1 80        	lda (addr_ptr),y
+003493  2               chr_addr:
+003493  2  1D DF 86     	ora $86df,x
+003496  2  9D DF 86     	sta $86df,x
+003499  2  C8           	iny			; Display line1
+00349A  2  C0 06        	cpy #6
+00349C  2  D0 F0        	bne chr_loop
+00349E  2               
+00349E  2  A4 8B        	ldy tmp_y
+0034A0  2  A6 8A        	ldx tmp_x
+0034A2  2  60           	rts
+0034A3  2               
+0034A3  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0034A3  2               ; Print string from given address until char=13
+0034A3  2               ;
+0034A3  2               ; X=lb address
+0034A3  2               ; Y=hb address
+0034A3  2               ;
+0034A3  2               ; address: lb_screen,hb_screen,"string",13
+0034A3  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0034A3  2               
+0034A3  2               print_string:
+0034A3  2  86 82        	stx addr_ptr2		; Set address pointer
+0034A5  2  84 83        	sty addr_ptr2+1
+0034A7  2               
+0034A7  2  A0 00        	ldy #0
+0034A9  2  B1 82        	lda (addr_ptr2),y	; Set screenaddress
+0034AB  2  85 8E        	sta txt_x
+0034AD  2  C8           	iny
+0034AE  2  B1 82        	lda (addr_ptr2),y
+0034B0  2  85 8F        	sta txt_y
+0034B2  2               
+0034B2  2               print_loop:
+0034B2  2  C8           	iny
+0034B3  2  B1 82        	lda (addr_ptr2),y	; Get string character
+0034B5  2  C9 0D        	cmp #13			; Stop if char=13
+0034B7  2  F0 08        	beq end_print_string
+0034B9  2  20 6A 34     	jsr plot_chr		; Print char
+0034BC  2  E6 8E        	inc txt_x
+0034BE  2  4C B2 34     	jmp print_loop		; Next char
+0034C1  2               
+0034C1  2               end_print_string:
+0034C1  2  60           	rts
+0034C2  2               
+0034C2  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0034C2  2               ; Print digit 8x10 in scoreboard at address given
+0034C2  2               ;
+0034C2  2               ; X=lb address
+0034C2  2               ; Y=hb address
+0034C2  2               ; A=number to print
+0034C2  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+0034C2  2               
+0034C2  2               print_digit:
+0034C2  2  86 82        	stx addr_ptr2		; Set address pointer
+0034C4  2  84 83        	sty addr_ptr2+1
+0034C6  2               
+0034C6  2  AA           	tax			; Set digit data address
+0034C7  2  BD B4 4C     	lda sc_digit_lb,x
+0034CA  2  8D DF 34     	sta digit_addr+1
+0034CD  2  8D EE 34     	sta digit_addr2+1
+0034D0  2  BD BE 4C     	lda sc_digit_hb,x
+0034D3  2  8D E0 34     	sta digit_addr+2
+0034D6  2  8D EF 34     	sta digit_addr2+2
+0034D9  2               
+0034D9  2  A2 00        	ldx #0
+0034DB  2               digit1_loop:
+0034DB  2  BC C8 4C     	ldy sc_tab,x
+0034DE  2               digit_addr:
+0034DE  2  BD 00 80     	lda $8000,x		; Get digit data
+0034E1  2  91 82        	sta (addr_ptr2),y	; Display first 8 lines on screen
+0034E3  2  E8           	inx
+0034E4  2  E0 10        	cpx #16
+0034E6  2  D0 F3        	bne digit1_loop
+0034E8  2               
+0034E8  2  E6 83        	inc addr_ptr2+1
+0034EA  2               digit_loop2:
+0034EA  2  BC B8 4C     	ldy sc_tab-16,x
+0034ED  2               digit_addr2:
+0034ED  2  BD 00 80     	lda $8000,x		; Get digit data
+0034F0  2  91 82        	sta (addr_ptr2),y	; Display 2 last lines on screen
+0034F2  2  E8           	inx
+0034F3  2  E0 14        	cpx #20
+0034F5  2  D0 F3        	bne digit_loop2
+0034F7  2               
+0034F7  2  60           	rts
+0034F8  2                
+0034F8  2               ;--------------------------------------------------------------------------
+0034F8  2               ; Scan key
+0034F8  2               ;
+0034F8  2               ; - Scan for key press (carry set is pressed, carry clear is no press)
+0034F8  2               ; - If pressed and key released in between, keypress flag set
+0034F8  2               ;--------------------------------------------------------------------------
+0034F8  2               
+0034F8  2               scan_key:
+0034F8  2  20 71 FE     	jsr os_keyscan		; Check if key pressed
+0034FB  2  90 14        	bcc no_key_pressed
+0034FD  2               
+0034FD  2  24 96        	bit key_released	; If pressed, check for release
+0034FF  2  30 09        	bmi not_released
+003501  2               
+003501  2  A9 FF        	lda #$ff		; Mark key pressed
+003503  2  85 96        	sta key_released
+003505  2  85 95        	sta key_pressed
+003507  2  4C 15 35     	jmp end_keyscan
+00350A  2               
+00350A  2               not_released:
+00350A  2  A9 00        	lda #0			; Mark key not released
+00350C  2  85 95        	sta key_pressed
+00350E  2  4C 15 35     	jmp end_keyscan
+003511  2               
+003511  2               no_key_pressed:
+003511  2  A9 00        	lda #0			; Mark key released
+003513  2  85 96        	sta key_released
+003515  2               end_keyscan:
+003515  2  60           	rts
+003516  2               
+003516  2               ;--------------------------------------------------------------------------
+003516  2               ; Wait
+003516  2               ;
+003516  2               ; - Wait for 6 + x*5 + 6 usec
+003516  2               ;--------------------------------------------------------------------------
+003516  2               
+003516  2               wait:
+003516  2  CA           	dex			; Wait a while
+003517  2  D0 FD        	bne wait
+003519  2  60           	rts
+00351A  2               
+00351A  2               ;--------------------------------------------------------------------------
+00351A  2               ; Get random nr, cycled after 256 times
+00351A  2               ;--------------------------------------------------------------------------
+00351A  2               
+00351A  2               get_random:
+00351A  2  A5 91        	lda seed
+00351C  2  8D 36 35     	sta tmp_seed
+00351F  2  F0 05        	beq doEor
+003521  2  0A           	asl a
+003522  2  F0 04        	beq noEor
+003524  2  90 02        	bcc noEor
+003526  2               doEor:
+003526  2  49 1D        	eor #$1d
+003528  2               noEor:
+003528  2  85 91        	sta seed
+00352A  2  4D 36 35     	eor tmp_seed
+00352D  2  29 03        	and #3
+00352F  2  D0 02        	bne end_random
+003531  2  E6 91        	inc seed
+003533  2               end_random:
+003533  2  A5 91        	lda seed
+003535  2  60           	rts
+003536  2               
+003536  2  00           tmp_seed:	.byte 0
+003537  2               
+003537  2               ;--------------------------------------------------------------------------
+003537  2               ; Sprite data storage
+003537  2               ;
+003537  2               ; - Char 0-255 data storage 
+003537  2               ; - Char = 4 x 8 coloured pixels
+003537  2               ; - Coloured pixel 00 = green
+003537  2               ;                  01 = yellow
+003537  2               ;                  10 = blue
+003537  2               ;                  11 = red
+003537  2               ;--------------------------------------------------------------------------
+003537  2               
+003537  2               sprites:
+003537  2               
+003537  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003537  2               ; Bottom bar, line11 (cycle every 2 chars)
+003537  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003537  2               
+003537  2  FF FD F5 D5  ch0:	.byte $ff,$fd,$f5,$d5,$55,$ff,$55,$55	; First byte 4x shifted left
+00353B  2  55 FF 55 55  
+00353F  2  FF F5 D5 55  ch1:	.byte $ff,$f5,$d5,$55,$57,$ff,$55,$55
+003543  2  57 FF 55 55  
+003547  2  FF D5 55 57  ch2:	.byte $ff,$d5,$55,$57,$5f,$ff,$55,$55
+00354B  2  5F FF 55 55  
+00354F  2  FF 55 57 5F  ch3:	.byte $ff,$55,$57,$5f,$7f,$ff,$55,$55
+003553  2  7F FF 55 55  
+003557  2               
+003557  2  FF 57 5F 7F  ch4:	.byte $ff,$57,$5f,$7f,$ff,$ff,$55,$55	; Second byte 4x shifted left
+00355B  2  FF FF 55 55  
+00355F  2  FF 5F 7F FF  ch5:	.byte $ff,$5f,$7f,$ff,$fd,$ff,$55,$55
+003563  2  FD FF 55 55  
+003567  2  FF 7F FF FD  ch6:	.byte $ff,$7f,$ff,$fd,$f5,$ff,$55,$55
+00356B  2  F5 FF 55 55  
+00356F  2  FF FF FD F5  ch7:	.byte $ff,$ff,$fd,$f5,$d5,$ff,$55,$55
+003573  2  D5 FF 55 55  
+003577  2               
+003577  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003577  2               ; Buildings sprites, lines 7-10 (static)
+003577  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003577  2               
+003577  2  00 00 00 00  ch8:	.byte $00,$00,$00,$00,$00,$00,$01,$05	; Line7, sky
+00357B  2  00 00 01 05  
+00357F  2  00 00 00 00  ch9:	.byte $00,$00,$00,$00,$01,$15,$55,$55
+003583  2  01 15 55 55  
+003587  2  00 00 00 00  ch10:	.byte $00,$00,$00,$00,$55,$55,$55,$55
+00358B  2  55 55 55 55  
+00358F  2  00 00 00 00  ch11:	.byte $00,$00,$00,$00,$40,$54,$55,$55
+003593  2  40 54 55 55  
+003597  2  00 00 00 00  ch12:	.byte $00,$00,$00,$00,$00,$00,$40,$50
+00359B  2  00 00 40 50  
+00359F  2  00 00 00 00  ch13:	.byte $00,$00,$00,$00,$00,$00,$00,$00
+0035A3  2  00 00 00 00  
+0035A7  2  00 00 00 00  ch14:	.byte $00,$00,$00,$00,$00,$00,$00,$00
+0035AB  2  00 00 00 00  
+0035AF  2  00 00 00 00  ch15:	.byte $00,$00,$00,$00,$00,$00,$00,$00
+0035B3  2  00 00 00 00  
+0035B7  2               
+0035B7  2  15 55 AA 59  ch16:	.byte $15,$55,$aa,$59,$a9,$55,$dd,$dd	; Line8, sky + buildings
+0035BB  2  A9 55 DD DD  
+0035BF  2  55 55 A9 59  ch17:	.byte $55,$55,$a9,$59,$d9,$59,$da,$d9
+0035C3  2  D9 59 DA D9  
+0035C7  2  55 55 55 55  ch18:	.byte $55,$55,$55,$55,$55,$55,$a5,$65
+0035CB  2  55 55 A5 65  
+0035CF  2  55 55 55 55  ch19:	.byte $55,$55,$55,$55,$55,$55,$55,$55
+0035D3  2  55 55 55 55  
+0035D7  2  50 54 55 55  ch20:	.byte $50,$54,$55,$55,$55,$55,$55,$55
+0035DB  2  55 55 55 55  
+0035DF  2  01 15 55 55  ch21:	.byte $01,$15,$55,$55,$55,$55,$5a,$59
+0035E3  2  55 55 5A 59  
+0035E7  2  55 55 55 55  ch22:	.byte $55,$55,$55,$55,$55,$55,$aa,$55
+0035EB  2  55 55 AA 55  
+0035EF  2  40 54 56 56  ch23:	.byte $40,$54,$56,$56,$5a,$59,$99,$99
+0035F3  2  5A 59 99 99  
+0035F7  2               
+0035F7  2  55 DD DD 55  ch24:	.byte $55,$dd,$dd,$55,$55,$dd,$dd,$55	; Line9, buildings
+0035FB  2  55 DD DD 55  
+0035FF  2  5A D9 D9 59  ch25:	.byte $5a,$d9,$d9,$59,$59,$d9,$d9,$59
+003603  2  59 D9 D9 59  
+003607  2  AA 55 55 77  ch26:	.byte $aa,$55,$55,$77,$77,$55,$77,$77
+00360B  2  77 55 77 77  
+00360F  2  A5 65 65 65  ch27:	.byte $a5,$65,$65,$65,$65,$65,$65,$65
+003613  2  65 65 65 65  
+003617  2  55 5A 59 59  ch28:	.byte $55,$5a,$59,$59,$59,$59,$59,$59
+00361B  2  59 59 59 59  
+00361F  2  59 AA 55 DD  ch29:	.byte $59,$aa,$55,$dd,$dd,$55,$dd,$dd
+003623  2  DD 55 DD DD  
+003627  2  D5 AA 55 D5  ch30:	.byte $d5,$aa,$55,$d5,$d5,$6a,$e5,$e7
+00362B  2  D5 6A E5 E7  
+00362F  2  99 99 99 99  ch31:	.byte $99,$99,$99,$99,$99,$a9,$59,$59
+003633  2  99 A9 59 59  
+003637  2               
+003637  2  DD AD 0A 00  ch32:	.byte $dd,$ad,$0a,$00,$02,$08,$80,$00	; Line10, bush
+00363B  2  02 08 80 00  
+00363F  2  D9 D8 40 8A  ch33:	.byte $d9,$d8,$40,$8a,$a0,$00,$00,$00
+003643  2  A0 00 00 00  
+003647  2  55 03 00 AA  ch34:	.byte $55,$03,$00,$aa,$02,$00,$00,$00
+00364B  2  02 00 00 00  
+00364F  2  65 6A A0 00  ch35:	.byte $65,$6a,$a0,$00,$a0,$0a,$00,$00
+003653  2  A0 0A 00 00  
+003657  2  59 A9 0A 00  ch36:	.byte $59,$a9,$0a,$00,$02,$08,$80,$00
+00365B  2  02 08 80 00  
+00365F  2  55 DD 00 8A  ch37:	.byte $55,$dd,$00,$8a,$a0,$00,$00,$00
+003663  2  A0 00 00 00  
+003667  2  67 E5 65 AA  ch38:	.byte $67,$e5,$65,$aa,$02,$00,$00,$00
+00366B  2  02 00 00 00  
+00366F  2  56 5A A0 00  ch39:	.byte $56,$5a,$a0,$00,$a0,$0a,$00,$00
+003673  2  A0 0A 00 00  
+003677  2               
+003677  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003677  2               ; Pipe top (cylce every 7 chars)
+003677  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003677  2               
+003677  2  02 02 02 02  ch40:	.byte $02,$02,$02,$02,$02,$02,$02,$02	; First byte 4x shifted left
+00367B  2  02 02 02 02  
+00367F  2  0A 0B 0B 0B  ch41:	.byte $0a,$0b,$0b,$0b,$0b,$0b,$0b,$0a
+003683  2  0B 0B 0B 0A  
+003687  2  2A 2F 2D 2D  ch42:	.byte $2a,$2f,$2d,$2d,$2d,$2d,$2f,$2a
+00368B  2  2D 2D 2F 2A  
+00368F  2  AA BF B5 B5  ch43:	.byte $aa,$bf,$b5,$b5,$b5,$b5,$bf,$aa
+003693  2  B5 B5 BF AA  
+003697  2               
+003697  2  AA FF D5 D5  ch44:	.byte $aa,$ff,$d5,$d5,$d5,$d5,$ff,$aa	; Second byte 4x shifted left
+00369B  2  D5 D5 FF AA  
+00369F  2  AA FF 55 55  ch45:	.byte $aa,$ff,$55,$55,$55,$55,$ff,$aa
+0036A3  2  55 55 FF AA  
+0036A7  2  AA FF 57 57  ch46:	.byte $aa,$ff,$57,$57,$57,$57,$ff,$aa
+0036AB  2  57 57 FF AA  
+0036AF  2  AA FF 5D 5D  ch47:	.byte $aa,$ff,$5d,$5d,$5d,$5d,$ff,$aa
+0036B3  2  5D 5D FF AA  
+0036B7  2               
+0036B7  2  AA FF 77 77  ch48:	.byte $aa,$ff,$77,$77,$77,$77,$ff,$aa	; Third byte 4x shifted left
+0036BB  2  77 77 FF AA  
+0036BF  2  AA FF DF DF  ch49:	.byte $aa,$ff,$df,$df,$df,$df,$ff,$aa
+0036C3  2  DF DF FF AA  
+0036C7  2  AA FF 7F 7F  ch50:	.byte $aa,$ff,$7f,$7f,$7f,$7f,$ff,$aa
+0036CB  2  7F 7F FF AA  
+0036CF  2  AA FF FF FF  ch51:	.byte $aa,$ff,$ff,$ff,$ff,$ff,$ff,$aa
+0036D3  2  FF FF FF AA  
+0036D7  2               
+0036D7  2  AA FF FF FF  ch52:	.byte $aa,$ff,$ff,$ff,$ff,$ff,$ff,$aa	; Fourth byte 4x shifted left
+0036DB  2  FF FF FF AA  
+0036DF  2  AA FF FF FF  ch53:	.byte $aa,$ff,$ff,$ff,$ff,$ff,$ff,$aa
+0036E3  2  FF FF FF AA  
+0036E7  2  AA FF FF FF  ch54:	.byte $aa,$ff,$ff,$ff,$ff,$ff,$ff,$aa
+0036EB  2  FF FF FF AA  
+0036EF  2  AA FF FF FF  ch55:	.byte $aa,$ff,$ff,$ff,$ff,$ff,$ff,$aa
+0036F3  2  FF FF FF AA  
+0036F7  2               
+0036F7  2  AA FF FF FF  ch56:	.byte $aa,$ff,$ff,$ff,$ff,$ff,$ff,$aa	; Fifth byte 4x shifted left
+0036FB  2  FF FF FF AA  
+0036FF  2  AA FF FF FF  ch57:	.byte $aa,$ff,$ff,$ff,$ff,$ff,$ff,$aa
+003703  2  FF FF FF AA  
+003707  2  AA FF FF FF  ch58:	.byte $aa,$ff,$ff,$ff,$ff,$ff,$ff,$aa
+00370B  2  FF FF FF AA  
+00370F  2  AA FF FD FD  ch59:	.byte $aa,$ff,$fd,$fd,$fd,$fd,$ff,$aa
+003713  2  FD FD FF AA  
+003717  2               
+003717  2  AA FF F7 F7  ch60:	.byte $aa,$ff,$f7,$f7,$f7,$f7,$ff,$aa	; Sixth byte 4x shifted left
+00371B  2  F7 F7 FF AA  
+00371F  2  AA FF DF DF  ch61:	.byte $aa,$ff,$df,$df,$df,$df,$ff,$aa
+003723  2  DF DF FF AA  
+003727  2  AA FE 7E 7E  ch62:	.byte $aa,$fe,$7e,$7e,$7e,$7e,$fe,$aa
+00372B  2  7E 7E FE AA  
+00372F  2  A8 F8 F8 F8  ch63:	.byte $a8,$f8,$f8,$f8,$f8,$f8,$f8,$a8
+003733  2  F8 F8 F8 A8  
+003737  2               
+003737  2  A0 E0 E0 E0  ch64:	.byte $a0,$e0,$e0,$e0,$e0,$e0,$e0,$a0	; Seventh byte 4x shifted left
+00373B  2  E0 E0 E0 A0  
+00373F  2  80 80 80 80  ch65:	.byte $80,$80,$80,$80,$80,$80,$80,$80
+003743  2  80 80 80 80  
+003747  2  00 00 00 00  ch66:	.byte 0,0,0,0,0,0,0,0
+00374B  2  00 00 00 00  
+00374F  2  00 00 00 00  ch67:	.byte 0,0,0,0,0,0,0,0
+003753  2  00 00 00 00  
+003757  2               
+003757  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003757  2               ; Pipe body (cylce every 7 chars)
+003757  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003757  2               
+003757  2  00 00 00 00  ch68:	.byte 0,0,0,0,0,0,0,0			; First byte 4x shifted left
+00375B  2  00 00 00 00  
+00375F  2  02 02 02 02  ch69:	.byte $02,$02,$02,$02,$02,$02,$02,$02
+003763  2  02 02 02 02  
+003767  2  0B 0B 0B 0B  ch70:	.byte $0b,$0b,$0b,$0b,$0b,$0b,$0b,$0b
+00376B  2  0B 0B 0B 0B  
+00376F  2  2D 2D 2D 2D  ch71:	.byte $2d,$2d,$2d,$2d,$2d,$2d,$2d,$2d
+003773  2  2D 2D 2D 2D  
+003777  2               
+003777  2  B5 B5 B5 B5  ch72:	.byte $b5,$b5,$b5,$b5,$b5,$b5,$b5,$b5	; Second byte 4x shifted left
+00377B  2  B5 B5 B5 B5  
+00377F  2  D5 D5 D5 D5  ch73:	.byte $d5,$d5,$d5,$d5,$d5,$d5,$d5,$d5
+003783  2  D5 D5 D5 D5  
+003787  2  55 55 55 55  ch74:	.byte $55,$55,$55,$55,$55,$55,$55,$55
+00378B  2  55 55 55 55  
+00378F  2  57 57 57 57  ch75:	.byte $57,$57,$57,$57,$57,$57,$57,$57
+003793  2  57 57 57 57  
+003797  2               
+003797  2  5D 5D 5D 5D  ch76:	.byte $5d,$5d,$5d,$5d,$5d,$5d,$5d,$5d	; Third byte 4x shifted left
+00379B  2  5D 5D 5D 5D  
+00379F  2  77 77 77 77  ch77:	.byte $77,$77,$77,$77,$77,$77,$77,$77
+0037A3  2  77 77 77 77  
+0037A7  2  DF DF DF DF  ch78:	.byte $df,$df,$df,$df,$df,$df,$df,$df
+0037AB  2  DF DF DF DF  
+0037AF  2  7F 7F 7F 7F  ch79:	.byte $7f,$7f,$7f,$7f,$7f,$7f,$7f,$7f
+0037B3  2  7F 7F 7F 7F  
+0037B7  2               
+0037B7  2  FF FF FF FF  ch80:	.byte $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff	; Fourth byte 4x shifted left
+0037BB  2  FF FF FF FF  
+0037BF  2  FF FF FF FF  ch81:	.byte $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff
+0037C3  2  FF FF FF FF  
+0037C7  2  FF FF FF FF  ch82:	.byte $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff
+0037CB  2  FF FF FF FF  
+0037CF  2  FF FF FF FF  ch83:	.byte $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff
+0037D3  2  FF FF FF FF  
+0037D7  2               
+0037D7  2  FF FF FF FF  ch84:	.byte $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff	; Fifth byte 4x shifted left
+0037DB  2  FF FF FF FF  
+0037DF  2  FF FF FF FF  ch85:	.byte $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff
+0037E3  2  FF FF FF FF  
+0037E7  2  FD FD FD FD  ch86:	.byte $fd,$fd,$fd,$fd,$fd,$fd,$fd,$fd
+0037EB  2  FD FD FD FD  
+0037EF  2  F7 F7 F7 F7  ch87:	.byte $f7,$f7,$f7,$f7,$f7,$f7,$f7,$f7
+0037F3  2  F7 F7 F7 F7  
+0037F7  2               
+0037F7  2  DF DF DF DF  ch88:	.byte $df,$df,$df,$df,$df,$df,$df,$df	; Sixth byte 4x shifted left
+0037FB  2  DF DF DF DF  
+0037FF  2  7E 7E 7E 7E  ch89:	.byte $7e,$7e,$7e,$7e,$7e,$7e,$7e,$7e
+003803  2  7E 7E 7E 7E  
+003807  2  F8 F8 F8 F8  ch90:	.byte $f8,$f8,$f8,$f8,$f8,$f8,$f8,$f8
+00380B  2  F8 F8 F8 F8  
+00380F  2  E0 E0 E0 E0  ch91:	.byte $e0,$e0,$e0,$e0,$e0,$e0,$e0,$e0
+003813  2  E0 E0 E0 E0  
+003817  2               
+003817  2  80 80 80 80  ch92:	.byte $80,$80,$80,$80,$80,$80,$80,$80	; Seventh byte 4x shifted left
+00381B  2  80 80 80 80  
+00381F  2  00 00 00 00  ch93:	.byte 0,0,0,0,0,0,0,0
+003823  2  00 00 00 00  
+003827  2  00 00 00 00  ch94:	.byte 0,0,0,0,0,0,0,0
+00382B  2  00 00 00 00  
+00382F  2  00 00 00 00  ch95:	.byte 0,0,0,0,0,0,0,0
+003833  2  00 00 00 00  
+003837  2               
+003837  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003837  2               ; Score
+003837  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003837  2               
+003837  2  AA 95 95 95  ch96:	.byte $aa,$95,$95,$95,$95,$95,$95,$95	; 0
+00383B  2  95 95 95 95  
+00383F  2  AA 55 55 55  ch97:	.byte $aa,$55,$55,$55,$65,$65,$65,$65
+003843  2  65 65 65 65  
+003847  2  A8 5A 5A 5A  ch98:	.byte $a8,$5a,$5a,$5a,$5a,$5a,$5a,$5a
+00384B  2  5A 5A 5A 5A  
+00384F  2  95 95 95 95  ch99:	.byte $95,$95,$95,$95,$95,$95,$aa,$2a
+003853  2  95 95 AA 2A  
+003857  2  65 65 65 55  ch100:	.byte $65,$65,$65,$55,$55,$55,$aa,$aa
+00385B  2  55 55 AA AA  
+00385F  2  5A 5A 5A 5A  ch101:	.byte $5a,$5a,$5a,$5a,$5a,$5a,$aa,$aa
+003863  2  5A 5A AA AA  
+003867  2               
+003867  2  AA 95 95 95  ch102:	.byte $aa,$95,$95,$95,$95,$a5,$25,$25	; 1
+00386B  2  95 A5 25 25  
+00386F  2  25 25 25 25  ch103:	.byte $25,$25,$25,$25,$25,$25,$2a,$0a
+003873  2  25 25 2A 0A  
+003877  2               
+003877  2  AA 95 95 95  ch104:	.byte $aa,$95,$95,$95,$95,$aa,$95,$95	; 2
+00387B  2  95 AA 95 95  
+00387F  2  AA 55 55 55  ch105:	.byte $aa,$55,$55,$55,$55,$a5,$55,$55
+003883  2  55 A5 55 55  
+003887  2  55 6A 55 55  ch106:	.byte $55,$6a,$55,$55,$55,$55,$aa,$aa
+00388B  2  55 55 AA AA  
+00388F  2  5A AA 5A 5A  ch107:	.byte $5a,$aa,$5a,$5a,$5a,$5a,$aa,$aa
+003893  2  5A 5A AA AA  
+003897  2               
+003897  2  95 AA 95 95  ch108:	.byte $95,$aa,$95,$95,$95,$95,$aa,$2a	; 3
+00389B  2  95 95 AA 2A  
+00389F  2  55 A5 55 55  ch109:	.byte $55,$a5,$55,$55,$55,$55,$aa,$aa
+0038A3  2  55 55 AA AA  
+0038A7  2               
+0038A7  2  AA 65 65 65  ch110:	.byte $aa,$65,$65,$65,$65,$65,$65,$65	; 4
+0038AB  2  65 65 65 65  
+0038AF  2  95 95 95 AA  ch111:	.byte $95,$95,$95,$aa,$2a,$00,$00,$00
+0038B3  2  2A 00 00 00  
+0038B7  2  55 55 55 A5  ch112:	.byte $55,$55,$55,$a5,$a5,$25,$2a,$0a
+0038BB  2  A5 25 2A 0A  
+0038BF  2               
+0038BF  2  AA 55 55 55  ch113:	.byte $aa,$55,$55,$55,$55,$6a,$55,$55	; 5
+0038C3  2  55 6A 55 55  
+0038C7  2  A8 5A 5A 5A  ch114:	.byte $a8,$5a,$5a,$5a,$5a,$aa,$5a,$5a
+0038CB  2  5A AA 5A 5A  
+0038CF  2               
+0038CF  2  55 65 55 55  ch115:	.byte $55,$65,$55,$55,$55,$55,$aa,$aa	; 6
+0038D3  2  55 55 AA AA  
+0038D7  2               
+0038D7  2  AA 2A 00 00  ch116:	.byte $aa,$2a,$00,$00,$00,$00,$00,$00	; 7
+0038DB  2  00 00 00 00  
+0038DF  2  A5 A5 25 25  ch117:	.byte $a5,$a5,$25,$25,$25,$25,$2a,$0a
+0038E3  2  25 25 2A 0A  
+0038E7  2               
+0038E7  2  AA 55 55 55  ch118:	.byte $aa,$55,$55,$55,$55,$65,$55,$55	; 8
+0038EB  2  55 65 55 55  
+0038EF  2               
+0038EF  2  00 0A 25 25  ch119:	.byte $00,$0a,$25,$25,$95,$95,$95,$95	; Scoreboard
+0038F3  2  95 95 95 95  
+0038F7  2  AA 55 55 55  ch120:	.byte $aa,$55,$55,$55,$55,$55,$55,$55
+0038FB  2  55 55 55 55  
+0038FF  2  00 A0 58 58  ch121:	.byte $00,$a0,$58,$58,$56,$56,$56,$56
+003903  2  56 56 56 56  
+003907  2  95 95 95 95  ch122:	.byte $95,$95,$95,$95,$95,$95,$95,$95
+00390B  2  95 95 95 95  
+00390F  2  55 55 55 55  ch123:	.byte $55,$55,$55,$55,$55,$55,$55,$55
+003913  2  55 55 55 55  
+003917  2  56 56 56 56  ch124:	.byte $56,$56,$56,$56,$56,$56,$56,$56
+00391B  2  56 56 56 56  
+00391F  2  95 95 95 95  ch125:	.byte $95,$95,$95,$95,$25,$25,$0a,$00
+003923  2  25 25 0A 00  
+003927  2  55 55 55 55  ch126:	.byte $55,$55,$55,$55,$55,$55,$55,$aa
+00392B  2  55 55 55 AA  
+00392F  2  56 56 56 56  ch127:	.byte $56,$56,$56,$56,$58,$58,$a0,$00
+003933  2  58 58 A0 00  
+003937  2               
+003937  2  10 11 12 30  digit1:	.byte 16,17,18,48,49,50	; Position digits on scoreboard
+00393B  2  31 32        
+00393D  2  0D 0E 0F 2D  digit2:	.byte 13,14,15,45,46,47
+003941  2  2E 2F        
+003943  2  0A 0B 0C 2A  digit3:	.byte 10,11,12,42,43,44
+003947  2  2B 2C        
+003949  2               
+003949  2  E0 E1 E2 E3  num0:	.byte 96+$80,97+$80,98+$80,99+$80,100+$80,101+$80
+00394D  2  E4 E5        
+00394F  2  E6 E2 8D E7  num1:	.byte 102+$80,98+$80,13+$80,103+$80,101+$80,13+$80
+003953  2  E5 8D        
+003955  2  E8 E9 E2 E3  num2:	.byte 104+$80,105+$80,98+$80,99+$80,106+$80,107+$80
+003959  2  EA EB        
+00395B  2  E8 E9 E2 EC  num3:	.byte 104+$80,105+$80,98+$80,108+$80,109+$80,101+$80
+00395F  2  ED E5        
+003961  2  E0 EE E2 EF  num4:	.byte 96+$80,110+$80,98+$80,111+$80,112+$80,101+$80
+003965  2  F0 E5        
+003967  2  E0 F1 F2 EC  num5:	.byte 96+$80,113+$80,114+$80,108+$80,109+$80,101+$80
+00396B  2  ED E5        
+00396D  2  E0 F1 F2 E3  num6:	.byte 96+$80,113+$80,114+$80,99+$80,115+$80,101+$80
+003971  2  F3 E5        
+003973  2  E0 E1 E2 F4  num7:	.byte 96+$80,97+$80,98+$80,116+$80,117+$80,101+$80
+003977  2  F5 E5        
+003979  2  E0 F6 E2 E3  num8:	.byte 96+$80,118+$80,98+$80,99+$80,115+$80,101+$80
+00397D  2  F3 E5        
+00397F  2  E0 F6 E2 EC  num9:	.byte 96+$80,118+$80,98+$80,108+$80,109+$80,101+$80
+003983  2  ED E5        
+003985  2               
+003985  2  49 4F 55 5B  num_lb:	.byte <num0,<num1,<num2,<num3,<num4,<num5,<num6,<num7,<num8,<num9
+003989  2  61 67 6D 73  
+00398D  2  79 7F        
+00398F  2  39 39 39 39  num_hb:	.byte >num0,>num1,>num2,>num3,>num4,>num5,>num6,>num7,>num8,>num9
+003993  2  39 39 39 39  
+003997  2  39 39        
+003999  2               
+003999  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003999  2               ; Flappy bird sprite flying
+003999  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003999  2               
+003999  2  00 00 02 2A  fch96:	.byte $00,$00,$02,$2a,$95,$95,$95,$25	; Flappy up
+00399D  2  95 95 95 25  
+0039A1  2  0A A5 55 95  	.byte $0a,$a5,$55,$95,$65,$59,$59,$65
+0039A5  2  65 59 59 65  
+0039A9  2  AA 65 95 95  	.byte $aa,$65,$95,$95,$95,$65,$5a,$6f
+0039AD  2  95 65 5A 6F  
+0039B1  2  00 80 60 98  	.byte $00,$80,$60,$98,$98,$58,$aa,$ff
+0039B5  2  98 58 AA FF  
+0039B9  2  0A 09 02 00  	.byte $0a,$09,$02,$00,$00,$00,$00,$00
+0039BD  2  00 00 00 00  
+0039C1  2  95 55 95 2A  	.byte $95,$55,$95,$2a,$00,$00,$00,$00
+0039C5  2  00 00 00 00  
+0039C9  2  BA 6F 5A A0  	.byte $ba,$6f,$5a,$a0,$00,$00,$00,$00
+0039CD  2  00 00 00 00  
+0039D1  2  AA FE A8 00  	.byte $aa,$fe,$a8,$00,$00,$00,$00,$00
+0039D5  2  00 00 00 00  
+0039D9  2               
+0039D9  2  00 00 02 09  fch104:	.byte $00,$00,$02,$09,$25,$2a,$95,$95	; Flappy middle
+0039DD  2  25 2A 95 95  
+0039E1  2  0A A5 55 55  	.byte $0a,$a5,$55,$55,$55,$a5,$59,$59
+0039E5  2  55 A5 59 59  
+0039E9  2  AA 65 95 95  	.byte $aa,$65,$95,$95,$95,$65,$5a,$6f
+0039ED  2  95 65 5A 6F  
+0039F1  2  00 80 60 98  	.byte $00,$80,$60,$98,$98,$58,$aa,$ff
+0039F5  2  98 58 AA FF  
+0039F9  2  2A 09 02 00  	.byte $2a,$09,$02,$00,$00,$00,$00,$00
+0039FD  2  00 00 00 00  
+003A01  2  A5 55 95 2A  	.byte $a5,$55,$95,$2a,$00,$00,$00,$00
+003A05  2  00 00 00 00  
+003A09  2  BA 6F 5A A0  	.byte $ba,$6f,$5a,$a0,$00,$00,$00,$00
+003A0D  2  00 00 00 00  
+003A11  2  AA FE A8 00  	.byte $aa,$fe,$a8,$00,$00,$00,$00,$00
+003A15  2  00 00 00 00  
+003A19  2               
+003A19  2  00 00 02 09  fch112:	.byte $00,$00,$02,$09,$25,$25,$2a,$95	; Flappy down
+003A1D  2  25 25 2A 95  
+003A21  2  0A A5 55 55  	.byte $0a,$a5,$55,$55,$55,$55,$a5,$59
+003A25  2  55 55 A5 59  
+003A29  2  AA 65 95 95  	.byte $aa,$65,$95,$95,$95,$65,$5a,$6f
+003A2D  2  95 65 5A 6F  
+003A31  2  00 80 60 98  	.byte $00,$80,$60,$98,$98,$58,$aa,$ff
+003A35  2  98 58 AA FF  
+003A39  2  95 95 2A 00  	.byte $95,$95,$2a,$00,$00,$00,$00,$00
+003A3D  2  00 00 00 00  
+003A41  2  65 95 95 2A  	.byte $65,$95,$95,$2a,$00,$00,$00,$00
+003A45  2  00 00 00 00  
+003A49  2  BA 6F 5A A0  	.byte $ba,$6f,$5a,$a0,$00,$00,$00,$00
+003A4D  2  00 00 00 00  
+003A51  2  AA FE A8 00  	.byte $aa,$fe,$a8,$00,$00,$00,$00,$00
+003A55  2  00 00 00 00  
+003A59  2               
+003A59  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003A59  2               ; Flappy bird sprite death
+003A59  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003A59  2               
+003A59  2  00 00 00 02  fldea0:	.byte $00,$00,$00,$02,$02,$09,$09,$09	; Flappy death sprite
+003A5D  2  02 09 09 09  
+003A61  2  0A 25 A5 65  	.byte $0a,$25,$a5,$65,$65,$65,$5a,$aa
+003A65  2  65 65 5A AA  
+003A69  2  00 A0 98 96  	.byte $00,$a0,$98,$96,$95,$95,$55,$55
+003A6D  2  95 95 55 55  
+003A71  2  00 00 00 00  	.byte $00,$00,$00,$00,$80,$80,$60,$60
+003A75  2  80 80 60 60  
+003A79  2  09 09 02 02  	.byte $09,$09,$02,$02,$02,$02,$02,$00
+003A7D  2  02 02 02 00  
+003A81  2  65 B9 EE EE  	.byte $65,$b9,$ee,$ee,$ee,$ee,$ee,$ae
+003A85  2  EE EE EE AE  
+003A89  2  6A 95 55 55  	.byte $6a,$95,$55,$55,$69,$56,$a8,$00
+003A8D  2  69 56 A8 00  
+003A91  2  60 A0 60 60  	.byte $60,$a0,$60,$60,$80,$00,$00,$00
+003A95  2  80 00 00 00  
+003A99  2               
+003A99  2               flappy_ani_lb:
+003A99  2  99 D9 19 D9  	.byte <fch96,<fch104,<fch112,<fch104,<fldea0
+003A9D  2  59           
+003A9E  2               flappy_ani_hb:
+003A9E  2  39 39 3A 39  	.byte >fch96,>fch104,>fch112,>fch104,>fldea0
+003AA2  2  3A           
+003AA3  2               
+003AA3  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003AA3  2               ; Flappy bird sprite mask
+003AA3  2               ;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003AA3  2               
+003AA3  2  FF FF FC C0  fma96:	.byte $ff,$ff,$fc,$c0,$00,$00,$00,$c0	; Mask Flappy up
+003AA7  2  00 00 00 C0  
+003AAB  2  F0 00 00 00  	.byte $f0,$00,$00,$00,$00,$00,$00,$00
+003AAF  2  00 00 00 00  
+003AB3  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00
+003AB7  2  00 00 00 00  
+003ABB  2  FF 3F 0F 03  	.byte $ff,$3f,$0f,$03,$03,$03,$00,$00
+003ABF  2  03 03 00 00  
+003AC3  2  F0 F0 FC FF  	.byte $f0,$f0,$fc,$ff,$ff,$ff,$ff,$ff
+003AC7  2  FF FF FF FF  
+003ACB  2  00 00 00 C0  	.byte $00,$00,$00,$c0,$ff,$ff,$ff,$ff
+003ACF  2  FF FF FF FF  
+003AD3  2  00 00 00 0F  	.byte $00,$00,$00,$0f,$ff,$ff,$ff,$ff
+003AD7  2  FF FF FF FF  
+003ADB  2  00 00 03 FF  	.byte $00,$00,$03,$ff,$ff,$ff,$ff,$ff
+003ADF  2  FF FF FF FF  
+003AE3  2               
+003AE3  2  FF FF FC F0  fma104:	.byte $ff,$ff,$fc,$f0,$c0,$c0,$00,$00	; Mask Flappy middle
+003AE7  2  C0 C0 00 00  
+003AEB  2  F0 00 00 00  	.byte $f0,$00,$00,$00,$00,$00,$00,$00
+003AEF  2  00 00 00 00  
+003AF3  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00
+003AF7  2  00 00 00 00  
+003AFB  2  FF 3F 0F 03  	.byte $ff,$3f,$0f,$03,$03,$03,$00,$00
+003AFF  2  03 03 00 00  
+003B03  2  C0 F0 FC FF  	.byte $c0,$f0,$fc,$ff,$ff,$ff,$ff,$ff
+003B07  2  FF FF FF FF  
+003B0B  2  00 00 00 C0  	.byte $00,$00,$00,$c0,$ff,$ff,$ff,$ff
+003B0F  2  FF FF FF FF  
+003B13  2  00 00 00 0F  	.byte $00,$00,$00,$0f,$ff,$ff,$ff,$ff
+003B17  2  FF FF FF FF  
+003B1B  2  00 00 03 FF  	.byte $00,$00,$03,$ff,$ff,$ff,$ff,$ff
+003B1F  2  FF FF FF FF  
+003B23  2               
+003B23  2  FF FF FC F0  fma112:	.byte $ff,$ff,$fc,$f0,$c0,$c0,$c0,$00	; Mask Flappy down
+003B27  2  C0 C0 C0 00  
+003B2B  2  F0 00 00 00  	.byte $f0,$00,$00,$00,$00,$00,$00,$00
+003B2F  2  00 00 00 00  
+003B33  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00
+003B37  2  00 00 00 00  
+003B3B  2  FF 3F 0F 03  	.byte $ff,$3f,$0f,$03,$03,$03,$00,$00
+003B3F  2  03 03 00 00  
+003B43  2  00 00 C0 FF  	.byte $00,$00,$c0,$ff,$ff,$ff,$ff,$ff
+003B47  2  FF FF FF FF  
+003B4B  2  00 00 00 C0  	.byte $00,$00,$00,$c0,$ff,$ff,$ff,$ff
+003B4F  2  FF FF FF FF  
+003B53  2  00 00 00 0F  	.byte $00,$00,$00,$0f,$ff,$ff,$ff,$ff
+003B57  2  FF FF FF FF  
+003B5B  2  00 00 03 FF  	.byte $00,$00,$03,$ff,$ff,$ff,$ff,$ff
+003B5F  2  FF FF FF FF  
+003B63  2               
+003B63  2  FF FF FF FC  fdmsk0:	.byte $ff,$ff,$ff,$fc,$fc,$f0,$f0,$f0	; Mask Flappy death
+003B67  2  FC F0 F0 F0  
+003B6B  2  F0 C0 00 00  	.byte $f0,$c0,$00,$00,$00,$00,$00,$00
+003B6F  2  00 00 00 00  
+003B73  2  FF 0F 03 00  	.byte $ff,$0f,$03,$00,$00,$00,$00,$00
+003B77  2  00 00 00 00  
+003B7B  2  FF FF FF FF  	.byte $ff,$ff,$ff,$ff,$3f,$3f,$0f,$0f
+003B7F  2  3F 3F 0F 0F  
+003B83  2  F0 F0 FC FC  	.byte $f0,$f0,$fc,$fc,$fc,$fc,$fc,$ff
+003B87  2  FC FC FC FF  
+003B8B  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00
+003B8F  2  00 00 00 00  
+003B93  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$03,$ff
+003B97  2  00 00 03 FF  
+003B9B  2  0F 0F 0F 0F  	.byte $0f,$0f,$0f,$0f,$3f,$ff,$ff,$ff
+003B9F  2  3F FF FF FF  
+003BA3  2               
+003BA3  2               flappy_msk_lb:
+003BA3  2  A3 E3 23 E3  	.byte <fma96,<fma104,<fma112,<fma104,<fdmsk0
+003BA7  2  63           
+003BA8  2               flappy_msk_hb:
+003BA8  2  3A 3A 3B 3A  	.byte >fma96,>fma104,>fma112,>fma104,>fdmsk0
+003BAC  2  3B           
+003BAD  2               
+003BAD  2               ;--------------------------------------------------------------------------
+003BAD  2               ; Character quick address lookup table
+003BAD  2               ;
+003BAD  2               ; - To speed up calculation of character data address, get lb,hb from table
+003BAD  2               ;--------------------------------------------------------------------------
+003BAD  2               
+003BAD  2               ch_lb:
+003BAD  2  37 3F 47 4F  	.byte <ch0,<ch1,<ch2,<ch3,<ch4,<ch5,<ch6,<ch7
+003BB1  2  57 5F 67 6F  
+003BB5  2  77 7F 87 8F  	.byte <ch8,<ch9,<ch10,<ch11,<ch12,<ch13,<ch14,<ch15
+003BB9  2  97 9F A7 AF  
+003BBD  2  B7 BF C7 CF  	.byte <ch16,<ch17,<ch18,<ch19,<ch20,<ch21,<ch22,<ch23
+003BC1  2  D7 DF E7 EF  
+003BC5  2  F7 FF 07 0F  	.byte <ch24,<ch25,<ch26,<ch27,<ch28,<ch29,<ch30,<ch31
+003BC9  2  17 1F 27 2F  
+003BCD  2  37 3F 47 4F  	.byte <ch32,<ch33,<ch34,<ch35,<ch36,<ch37,<ch38,<ch39
+003BD1  2  57 5F 67 6F  
+003BD5  2  77 7F 87 8F  	.byte <ch40,<ch41,<ch42,<ch43,<ch44,<ch45,<ch46,<ch47
+003BD9  2  97 9F A7 AF  
+003BDD  2  B7 BF C7 CF  	.byte <ch48,<ch49,<ch50,<ch51,<ch52,<ch53,<ch54,<ch55
+003BE1  2  D7 DF E7 EF  
+003BE5  2  F7 FF 07 0F  	.byte <ch56,<ch57,<ch58,<ch59,<ch60,<ch61,<ch62,<ch63
+003BE9  2  17 1F 27 2F  
+003BED  2  37 3F 47 4F  	.byte <ch64,<ch65,<ch66,<ch67,<ch68,<ch69,<ch70,<ch71
+003BF1  2  57 5F 67 6F  
+003BF5  2  77 7F 87 8F  	.byte <ch72,<ch73,<ch74,<ch75,<ch76,<ch77,<ch78,<ch79
+003BF9  2  97 9F A7 AF  
+003BFD  2  B7 BF C7 CF  	.byte <ch80,<ch81,<ch82,<ch83,<ch84,<ch85,<ch86,<ch87
+003C01  2  D7 DF E7 EF  
+003C05  2  F7 FF 07 0F  	.byte <ch88,<ch89,<ch90,<ch91,<ch92,<ch93,<ch94,<ch95
+003C09  2  17 1F 27 2F  
+003C0D  2  37 3F 47 4F  	.byte <ch96,<ch97,<ch98,<ch99,<ch100,<ch101,<ch102,<ch103
+003C11  2  57 5F 67 6F  
+003C15  2  77 7F 87 8F  	.byte <ch104,<ch105,<ch106,<ch107,<ch108,<ch109,<ch110,<ch111
+003C19  2  97 9F A7 AF  
+003C1D  2  B7 BF C7 CF  	.byte <ch112,<ch113,<ch114,<ch115,<ch116,<ch117,<ch118,<ch119
+003C21  2  D7 DF E7 EF  
+003C25  2  F7 FF 07 0F  	.byte <ch120,<ch121,<ch122,<ch123,<ch124,<ch125,<ch126,<ch127
+003C29  2  17 1F 27 2F  
+003C2D  2               ch_hb:
+003C2D  2  35 35 35 35  	.byte >ch0,>ch1,>ch2,>ch3,>ch4,>ch5,>ch6,>ch7
+003C31  2  35 35 35 35  
+003C35  2  35 35 35 35  	.byte >ch8,>ch9,>ch10,>ch11,>ch12,>ch13,>ch14,>ch15
+003C39  2  35 35 35 35  
+003C3D  2  35 35 35 35  	.byte >ch16,>ch17,>ch18,>ch19,>ch20,>ch21,>ch22,>ch23
+003C41  2  35 35 35 35  
+003C45  2  35 35 36 36  	.byte >ch24,>ch25,>ch26,>ch27,>ch28,>ch29,>ch30,>ch31
+003C49  2  36 36 36 36  
+003C4D  2  36 36 36 36  	.byte >ch32,>ch33,>ch34,>ch35,>ch36,>ch37,>ch38,>ch39
+003C51  2  36 36 36 36  
+003C55  2  36 36 36 36  	.byte >ch40,>ch41,>ch42,>ch43,>ch44,>ch45,>ch46,>ch47
+003C59  2  36 36 36 36  
+003C5D  2  36 36 36 36  	.byte >ch48,>ch49,>ch50,>ch51,>ch52,>ch53,>ch54,>ch55
+003C61  2  36 36 36 36  
+003C65  2  36 36 37 37  	.byte >ch56,>ch57,>ch58,>ch59,>ch60,>ch61,>ch62,>ch63
+003C69  2  37 37 37 37  
+003C6D  2  37 37 37 37  	.byte >ch64,>ch65,>ch66,>ch67,>ch68,>ch69,>ch70,>ch71
+003C71  2  37 37 37 37  
+003C75  2  37 37 37 37  	.byte >ch72,>ch73,>ch74,>ch75,>ch76,>ch77,>ch78,>ch79
+003C79  2  37 37 37 37  
+003C7D  2  37 37 37 37  	.byte >ch80,>ch81,>ch82,>ch83,>ch84,>ch85,>ch86,>ch87
+003C81  2  37 37 37 37  
+003C85  2  37 37 38 38  	.byte >ch88,>ch89,>ch90,>ch91,>ch92,>ch93,>ch94,>ch95
+003C89  2  38 38 38 38  
+003C8D  2  38 38 38 38  	.byte >ch96,>ch97,>ch98,>ch99,>ch100,>ch101,>ch102,>ch103
+003C91  2  38 38 38 38  
+003C95  2  38 38 38 38  	.byte >ch104,>ch105,>ch106,>ch107,>ch108,>ch109,>ch110,>ch111
+003C99  2  38 38 38 38  
+003C9D  2  38 38 38 38  	.byte >ch112,>ch113,>ch114,>ch115,>ch116,>ch117,>ch118,>ch119
+003CA1  2  38 38 38 38  
+003CA5  2  38 38 39 39  	.byte >ch120,>ch121,>ch122,>ch123,>ch124,>ch125,>ch126,>ch127
+003CA9  2  39 39 39 39  
+003CAD  2               
+003CAD  2               ;--------------------------------------------------------------------------
+003CAD  2               ; Screen background without bird and pipes
+003CAD  2               ;
+003CAD  2               ; - Initial background data
+003CAD  2               ;--------------------------------------------------------------------------
+003CAD  2               
+003CAD  2               scr_base:
+003CAD  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13		; Line0
+003CB1  2  0D 0D 0D 0D  
+003CB5  2  0D 0D 0D 0D  
+003CBD  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13
+003CC1  2  0D 0D 0D 0D  
+003CC5  2  0D 0D 0D 0D  
+003CCD  2               
+003CCD  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13		; Line1
+003CD1  2  0D 0D 0D 0D  
+003CD5  2  0D 0D 0D 0D  
+003CDD  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13
+003CE1  2  0D 0D 0D 0D  
+003CE5  2  0D 0D 0D 0D  
+003CED  2               
+003CED  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13		; Line2
+003CF1  2  0D 0D 0D 0D  
+003CF5  2  0D 0D 0D 0D  
+003CFD  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13
+003D01  2  0D 0D 0D 0D  
+003D05  2  0D 0D 0D 0D  
+003D0D  2               
+003D0D  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13		; Line3
+003D11  2  0D 0D 0D 0D  
+003D15  2  0D 0D 0D 0D  
+003D1D  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13
+003D21  2  0D 0D 0D 0D  
+003D25  2  0D 0D 0D 0D  
+003D2D  2               
+003D2D  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13
+003D31  2  0D 0D 0D 0D  
+003D35  2  0D 0D 0D 0D  
+003D3D  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13
+003D41  2  0D 0D 0D 0D  
+003D45  2  0D 0D 0D 0D  
+003D4D  2               
+003D4D  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13
+003D51  2  0D 0D 0D 0D  
+003D55  2  0D 0D 0D 0D  
+003D5D  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13
+003D61  2  0D 0D 0D 0D  
+003D65  2  0D 0D 0D 0D  
+003D6D  2               
+003D6D  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13		; Line6
+003D71  2  0D 0D 0D 0D  
+003D75  2  0D 0D 0D 0D  
+003D7D  2  0D 0D 0D 0D  	.byte 13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13
+003D81  2  0D 0D 0D 0D  
+003D85  2  0D 0D 0D 0D  
+003D8D  2               
+003D8D  2  08 09 0A 0B  	.byte 8,9,10,11,12,13,14,15,8,9,10,11,12,13,14,15		; Line7
+003D91  2  0C 0D 0E 0F  
+003D95  2  08 09 0A 0B  
+003D9D  2  08 09 0A 0B  	.byte 8,9,10,11,12,13,14,15,8,9,10,11,12,13,14,15
+003DA1  2  0C 0D 0E 0F  
+003DA5  2  08 09 0A 0B  
+003DAD  2               
+003DAD  2  10 11 12 13  	.byte 16,17,18,19,20,21,22,23,16,17,18,19,20,21,22,23		; Line8
+003DB1  2  14 15 16 17  
+003DB5  2  10 11 12 13  
+003DBD  2  10 11 12 13  	.byte 16,17,18,19,20,21,22,23,16,17,18,19,20,21,22,23
+003DC1  2  14 15 16 17  
+003DC5  2  10 11 12 13  
+003DCD  2               
+003DCD  2  18 19 1A 1B  	.byte 24,25,26,27,28,29,30,31,24,25,26,27,28,29,30,31		; Line9
+003DD1  2  1C 1D 1E 1F  
+003DD5  2  18 19 1A 1B  
+003DDD  2  18 19 1A 1B  	.byte 24,25,26,27,28,29,30,31,24,25,26,27,28,29,30,31
+003DE1  2  1C 1D 1E 1F  
+003DE5  2  18 19 1A 1B  
+003DED  2               
+003DED  2  20 21 22 23  	.byte 32,33,34,35,36,37,38,39,32,33,34,35,36,37,38,39		; Line10
+003DF1  2  24 25 26 27  
+003DF5  2  20 21 22 23  
+003DFD  2  20 21 22 23  	.byte 32,33,34,35,36,37,38,39,32,33,34,35,36,37,38,39
+003E01  2  24 25 26 27  
+003E05  2  20 21 22 23  
+003E0D  2               
+003E0D  2  00 04 00 04  	.byte 0,4,0,4,0,4,0,4,0,4,0,4,0,4,0,4				; Line11
+003E11  2  00 04 00 04  
+003E15  2  00 04 00 04  
+003E1D  2  00 04 00 04  	.byte 0,4,0,4,0,4,0,4,0,4,0,4,0,4,0,4
+003E21  2  00 04 00 04  
+003E25  2  00 04 00 04  
+003E2D  2               
+003E2D  2               ;--------------------------------------------------------------------------
+003E2D  2               ; Array storage, current screen and update screen
+003E2D  2               ;
+003E2D  2               ; - Current screen contains chars on screen
+003E2D  2               ; - Update screen contains changed chars on screen, if no change value=$ff
+003E2D  2               ;--------------------------------------------------------------------------
+003E2D  2               
+003E2D  2               scr_current:
+003E2D  2  00 00 00 00  	.repeat 32*12
+003E31  2  00 00 00 00  
+003E35  2  00 00 00 00  
+003FAD  2               		.byte 0
+003FAD  2               	.endrep
+003FAD  2               
+003FAD  2               ;--------------------------------------------------------------------------
+003FAD  2               ; Animation table
+003FAD  2               ;
+003FAD  2               ; - Every character jumps to the according routine to execute animation
+003FAD  2               ;--------------------------------------------------------------------------
+003FAD  2               
+003FAD  2               ani_table_lb:
+003FAD  2               
+003FAD  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003FAD  2               	; Bottombar chars
+003FAD  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003FAD  2               
+003FAD  2  58 58 58 58  	.byte <ani0,<ani0,<ani0,<ani0,<ani0,<ani0,<ani0,<ani0			;   0-  7
+003FB1  2  58 58 58 58  
+003FB5  2               
+003FB5  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003FB5  2               	; Background chars
+003FB5  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003FB5  2               
+003FB5  2  C7 C7 C7 C7  	.byte <no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani	;   8- 15
+003FB9  2  C7 C7 C7 C7  
+003FBD  2  C7 C7 C7 C7  	.byte <no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani   ;  16- 23
+003FC1  2  C7 C7 C7 C7  
+003FC5  2  C7 C7 C7 C7  	.byte <no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani	;  24- 31
+003FC9  2  C7 C7 C7 C7  
+003FCD  2  C7 C7 C7 C7  	.byte <no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani	;  32- 39
+003FD1  2  C7 C7 C7 C7  
+003FD5  2               
+003FD5  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003FD5  2               	; Pipe top chars
+003FD5  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003FD5  2               
+003FD5  2  64 64 64 74  	.byte <ani1,<ani1,<ani1,<ani2,<ani1,<ani1,<ani1,<ani2			;  40- 47
+003FD9  2  64 64 64 74  
+003FDD  2  64 64 64 74  	.byte <ani1,<ani1,<ani1,<ani2,<ani1,<ani1,<ani1,<ani2			;  48- 55
+003FE1  2  64 64 64 74  
+003FE5  2  64 64 64 74  	.byte <ani1,<ani1,<ani1,<ani2,<ani1,<ani1,<ani1,<ani2			;  56- 63
+003FE9  2  64 64 64 74  
+003FED  2  64 64 64 8B  	.byte <ani1,<ani1,<ani1,<ani3						;  64- 67
+003FF1  2               
+003FF1  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003FF1  2               	; Pipe body chars
+003FF1  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+003FF1  2               
+003FF1  2  64 64 64 74  	.byte <ani1,<ani1,<ani1,<ani2						;  68- 71 
+003FF5  2  64 64 64 74  	.byte <ani1,<ani1,<ani1,<ani2,<ani1,<ani1,<ani1,<ani2			;  72- 79
+003FF9  2  64 64 64 74  
+003FFD  2  64 64 64 74  	.byte <ani1,<ani1,<ani1,<ani2,<ani1,<ani1,<ani1,<ani2			;  80- 87
+004001  2  64 64 64 74  
+004005  2  64 64 64 74  	.byte <ani1,<ani1,<ani1,<ani2,<ani1,<ani1,<ani1,<ani3			;  88- 95
+004009  2  64 64 64 8B  
+00400D  2               
+00400D  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+00400D  2               	; Score digits
+00400D  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+00400D  2               
+00400D  2  C7 C7 C7 C7  	.byte <no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani	;  96-103
+004011  2  C7 C7 C7 C7  
+004015  2  C7 C7 C7 C7  	.byte <no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani	; 104-111
+004019  2  C7 C7 C7 C7  
+00401D  2  C7 C7 C7 C7  	.byte <no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani	; 112-119
+004021  2  C7 C7 C7 C7  
+004025  2  C7 C7 C7 C7  	.byte <no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani,<no_ani	; 120-127
+004029  2  C7 C7 C7 C7  
+00402D  2               
+00402D  2               ani_table_hb:
+00402D  2               
+00402D  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+00402D  2               	; Bottombar chars
+00402D  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+00402D  2               
+00402D  2  30 30 30 30  	.byte >ani0,>ani0,>ani0,>ani0,>ani0,>ani0,>ani0,>ani0			;   0-  7
+004031  2  30 30 30 30  
+004035  2               
+004035  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+004035  2               	; Pipe top chars
+004035  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+004035  2               
+004035  2  30 30 30 30  	.byte >no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani   ;  16- 23
+004039  2  30 30 30 30  
+00403D  2  30 30 30 30  	.byte >no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani	;  24- 31
+004041  2  30 30 30 30  
+004045  2  30 30 30 30  	.byte >no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani	;  32- 39
+004049  2  30 30 30 30  
+00404D  2  30 30 30 30  	.byte >no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani
+004051  2  30 30 30 30  
+004055  2               
+004055  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+004055  2               	; Pipe top chars
+004055  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+004055  2               
+004055  2  30 30 30 30  	.byte >ani1,>ani1,>ani1,>ani2,>ani1,>ani1,>ani1,>ani2			;  40- 47
+004059  2  30 30 30 30  
+00405D  2  30 30 30 30  	.byte >ani1,>ani1,>ani1,>ani2,>ani1,>ani1,>ani1,>ani2			;  48- 55
+004061  2  30 30 30 30  
+004065  2  30 30 30 30  	.byte >ani1,>ani1,>ani1,>ani2,>ani1,>ani1,>ani1,>ani2			;  56- 63
+004069  2  30 30 30 30  
+00406D  2  30 30 30 30  	.byte >ani1,>ani1,>ani1,>ani3						;  64- 67
+004071  2               
+004071  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+004071  2               	; Pipe body chars
+004071  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+004071  2               
+004071  2  30 30 30 30  	.byte >ani1,>ani1,>ani1,>ani2						;  68- 71
+004075  2  30 30 30 30  	.byte >ani1,>ani1,>ani1,>ani2,>ani1,>ani1,>ani1,>ani2			;  72- 79
+004079  2  30 30 30 30  
+00407D  2  30 30 30 30  	.byte >ani1,>ani1,>ani1,>ani2,>ani1,>ani1,>ani1,>ani2			;  80- 87
+004081  2  30 30 30 30  
+004085  2  30 30 30 30  	.byte >ani1,>ani1,>ani1,>ani2,>ani1,>ani1,>ani1,>ani3			;  88- 95
+004089  2  30 30 30 30  
+00408D  2               
+00408D  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+00408D  2               	; Score digits
+00408D  2               	;-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.
+00408D  2               
+00408D  2  30 30 30 30  	.byte >no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani	;  96-103
+004091  2  30 30 30 30  
+004095  2  30 30 30 30  	.byte >no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani	; 104-111
+004099  2  30 30 30 30  
+00409D  2  30 30 30 30  	.byte >no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani	; 112-119
+0040A1  2  30 30 30 30  
+0040A5  2  30 30 30 30  	.byte >no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani,>no_ani	; 120-127
+0040A9  2  30 30 30 30  
+0040AD  2               
+0040AD  2               
+0040AD  1               	.include "tap.inc"		; Tap Key banner
+0040AD  2               ; Get Ready banner, 22 x 24
+0040AD  2               
+0040AD  2               getready:
+0040AD  2  02 AA A8 00  	.byte $02,$AA,$A8,$00,$00,$0A,$AA,$00,$AA,$AA,$00,$00,$00,$00,$00,$00,$02,$AA,$80,$00,$0A,$AA
+0040B1  2  00 0A AA 00  
+0040B5  2  AA AA 00 00  
+0040C3  2  09 55 58 00  	.byte $09,$55,$58,$00,$00,$09,$56,$00,$95,$55,$80,$00,$00,$00,$00,$00,$02,$55,$80,$00,$09,$56
+0040C7  2  00 09 56 00  
+0040CB  2  95 55 80 00  
+0040D9  2  25 55 58 0A  	.byte $25,$55,$58,$0A,$80,$09,$56,$00,$95,$55,$60,$0A,$80,$00,$00,$00,$02,$55,$80,$00,$09,$56
+0040DD  2  80 09 56 00  
+0040E1  2  95 55 60 0A  
+0040EF  2  95 55 58 25  	.byte $95,$55,$58,$25,$60,$09,$56,$00,$95,$55,$58,$25,$60,$00,$00,$00,$02,$55,$80,$00,$09,$56
+0040F3  2  60 09 56 00  
+0040F7  2  95 55 58 25  
+004105  2  95 55 58 95  	.byte $95,$55,$58,$95,$58,$09,$56,$00,$95,$55,$58,$95,$58,$00,$AA,$A8,$02,$55,$AA,$AA,$A9,$56
+004109  2  58 09 56 00  
+00410D  2  95 55 58 95  
+00411B  2  95 6A AA 55  	.byte $95,$6A,$AA,$55,$56,$A9,$56,$A0,$95,$65,$5A,$55,$56,$02,$55,$58,$2A,$55,$95,$65,$59,$56
+00411F  2  56 A9 56 A0  
+004123  2  95 65 5A 55  
+004131  2  95 6A A9 55  	.byte $95,$6A,$A9,$55,$55,$95,$55,$60,$95,$65,$59,$55,$55,$89,$55,$58,$95,$55,$95,$65,$59,$56
+004135  2  55 95 55 60  
+004139  2  95 65 59 55  
+004147  2  95 65 59 55  	.byte $95,$65,$59,$55,$55,$95,$55,$60,$95,$65,$59,$55,$55,$A5,$55,$5A,$55,$55,$95,$65,$59,$56
+00414B  2  55 95 55 60  
+00414F  2  95 65 59 55  
+00415D  2  95 65 59 56  	.byte $95,$65,$59,$56,$55,$95,$55,$60,$95,$65,$59,$56,$55,$95,$55,$59,$55,$55,$95,$65,$59,$56
+004161  2  55 95 55 60  
+004165  2  95 65 59 56  
+004173  2  95 65 59 56  	.byte $95,$65,$59,$56,$55,$95,$55,$60,$95,$55,$59,$56,$55,$95,$55,$59,$55,$55,$95,$65,$59,$56
+004177  2  55 95 55 60  
+00417B  2  95 55 59 56  
+004189  2  95 65 59 56  	.byte $95,$65,$59,$56,$55,$A9,$56,$A0,$95,$55,$59,$56,$55,$95,$65,$59,$56,$55,$95,$65,$59,$56
+00418D  2  55 A9 56 A0  
+004191  2  95 55 59 56  
+00419F  2  95 65 59 55  	.byte $95,$65,$59,$55,$55,$A9,$56,$A0,$95,$55,$59,$55,$55,$95,$65,$59,$56,$55,$95,$65,$59,$56
+0041A3  2  55 A9 56 A0  
+0041A7  2  95 55 59 55  
+0041B5  2  95 65 59 55  	.byte $95,$65,$59,$55,$55,$89,$56,$00,$95,$55,$69,$55,$55,$95,$65,$59,$56,$55,$95,$55,$5A,$AA
+0041B9  2  55 89 56 00  
+0041BD  2  95 55 69 55  
+0041CB  2  95 65 59 55  	.byte $95,$65,$59,$55,$55,$89,$56,$A0,$95,$55,$A9,$55,$55,$95,$65,$59,$56,$55,$95,$55,$5A,$AA
+0041CF  2  55 89 56 A0  
+0041D3  2  95 55 A9 55  
+0041E1  2  95 55 59 55  	.byte $95,$55,$59,$55,$AA,$89,$55,$60,$95,$55,$A9,$55,$AA,$95,$55,$59,$55,$55,$A5,$55,$59,$56
+0041E5  2  AA 89 55 60  
+0041E9  2  95 55 A9 55  
+0041F7  2  95 55 59 55  	.byte $95,$55,$59,$55,$AA,$89,$55,$60,$95,$65,$69,$55,$AA,$95,$55,$59,$55,$55,$A9,$55,$59,$56
+0041FB  2  AA 89 55 60  
+0041FF  2  95 65 69 55  
+00420D  2  A5 55 5A 55  	.byte $A5,$55,$5A,$55,$80,$0A,$55,$60,$95,$65,$5A,$55,$80,$A5,$55,$5A,$55,$55,$8A,$A5,$59,$56
+004211  2  80 0A 55 60  
+004215  2  95 65 5A 55  
+004223  2  29 55 5A 95  	.byte $29,$55,$5A,$95,$80,$02,$95,$60,$95,$65,$5A,$95,$80,$29,$55,$5A,$95,$55,$82,$A5,$59,$56
+004227  2  80 02 95 60  
+00422B  2  95 65 5A 95  
+004239  2  0A AA A8 AA  	.byte $0A,$AA,$A8,$AA,$80,$00,$AA,$A0,$AA,$AA,$A8,$AA,$80,$0A,$AA,$A8,$AA,$AA,$82,$55,$5A,$AA
+00423D  2  80 00 AA A0  
+004241  2  AA AA A8 AA  
+00424F  2  02 AA A8 2A  	.byte $02,$AA,$A8,$2A,$80,$00,$2A,$A0,$AA,$AA,$A8,$2A,$80,$02,$AA,$A8,$2A,$AA,$82,$55,$5A,$AA
+004253  2  80 00 2A A0  
+004257  2  AA AA A8 2A  
+004265  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$02,$55,$68,$00
+004269  2  00 00 00 00  
+00426D  2  00 00 00 00  
+00427B  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$02,$55,$A0,$00
+00427F  2  00 00 00 00  
+004283  2  00 00 00 00  
+004291  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$02,$AA,$80,$00
+004295  2  00 00 00 00  
+004299  2  00 00 00 00  
+0042A7  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$02,$AA,$00,$00
+0042AB  2  00 00 00 00  
+0042AF  2  00 00 00 00  
+0042BD  2               
+0042BD  1               	.include "gameover.inc"		; Game Over banner
+0042BD  2               ;Tap Key to start banner, 14 x 18
+0042BD  2               
+0042BD  2               tap:
+0042BD  2  55 55 55 55  	.byte $55,$55,$55,$55,$00,$00,$02,$00,$00,$00,$55,$55,$55,$55
+0042C1  2  00 00 02 00  
+0042C5  2  00 00 55 55  
+0042CB  2  7F FF FF FF  	.byte $7F,$FF,$FF,$FF,$40,$00,$02,$00,$00,$01,$FF,$FF,$FF,$FD
+0042CF  2  40 00 02 00  
+0042D3  2  00 01 FF FF  
+0042D9  2  75 7D 7D 5F  	.byte $75,$7D,$7D,$5F,$D0,$02,$02,$02,$00,$07,$D5,$F5,$F5,$7D
+0042DD  2  D0 02 02 02  
+0042E1  2  00 07 D5 F5  
+0042E7  2  7D F7 DD F7  	.byte $7D,$F7,$DD,$F7,$F4,$00,$80,$08,$00,$1F,$F7,$DF,$77,$DD
+0042EB  2  F4 00 80 08  
+0042EF  2  00 1F F7 DF  
+0042F5  2  7D F7 DD F7  	.byte $7D,$F7,$DD,$F7,$FD,$00,$00,$00,$00,$7F,$F7,$DF,$77,$DD
+0042F9  2  FD 00 00 00  
+0042FD  2  00 7F F7 DF  
+004303  2  7D F5 5D 5F  	.byte $7D,$F5,$5D,$5F,$F4,$00,$02,$80,$00,$1F,$F7,$D5,$75,$7D
+004307  2  F4 00 02 80  
+00430B  2  00 1F F7 D5  
+004311  2  7D F7 DD FF  	.byte $7D,$F7,$DD,$FF,$D0,$00,$09,$60,$00,$07,$F7,$DF,$77,$FD
+004315  2  D0 00 09 60  
+004319  2  00 07 F7 DF  
+00431F  2  7F FF FF FF  	.byte $7F,$FF,$FF,$FF,$40,$00,$09,$60,$00,$01,$FF,$FF,$FF,$FD
+004323  2  40 00 09 60  
+004327  2  00 01 FF FF  
+00432D  2  55 55 55 55  	.byte $55,$55,$55,$55,$00,$00,$09,$60,$00,$00,$55,$55,$55,$55
+004331  2  00 00 09 60  
+004335  2  00 00 55 55  
+00433B  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$09,$6A,$00,$00,$00,$00,$00,$00
+00433F  2  00 00 09 6A  
+004343  2  00 00 00 00  
+004349  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$29,$55,$80,$00,$00,$00,$00,$00
+00434D  2  00 00 29 55  
+004351  2  80 00 00 00  
+004357  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$99,$55,$60,$00,$00,$00,$00,$00
+00435B  2  00 00 99 55  
+00435F  2  60 00 00 00  
+004365  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$95,$55,$60,$00,$00,$00,$00,$00
+004369  2  00 00 95 55  
+00436D  2  60 00 00 00  
+004373  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$95,$55,$60,$00,$00,$00,$00,$00
+004377  2  00 00 95 55  
+00437B  2  60 00 00 00  
+004381  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$25,$55,$60,$00,$00,$00,$00,$00
+004385  2  00 00 25 55  
+004389  2  60 00 00 00  
+00438F  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$09,$55,$60,$00,$00,$00,$00,$00
+004393  2  00 00 09 55  
+004397  2  60 00 00 00  
+00439D  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$02,$55,$80,$00,$00,$00,$00,$00
+0043A1  2  00 00 02 55  
+0043A5  2  80 00 00 00  
+0043AB  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$02,$AA,$80,$00,$00,$00,$00,$00
+0043AF  2  00 00 02 AA  
+0043B3  2  80 00 00 00  
+0043B9  2               
+0043B9  2               
+0043B9  1               	.include "title.inc"		; Title banner
+0043B9  2               ; Game Over banner, 22 x 20
+0043B9  2               
+0043B9  2               gameover:
+0043B9  2  02 AA A8 00  	.byte $02,$AA,$A8,$00,$00,$00,$00,$00,$00,$00,$00,$00,$02,$AA,$00,$00,$00,$00,$00,$00,$00,$00
+0043BD  2  00 00 00 00  
+0043C1  2  00 00 00 00  
+0043CF  2  09 55 58 00  	.byte $09,$55,$58,$00,$00,$00,$00,$00,$00,$00,$00,$00,$09,$55,$80,$00,$00,$00,$00,$00,$00,$00
+0043D3  2  00 00 00 00  
+0043D7  2  00 00 00 00  
+0043E5  2  25 55 58 00  	.byte $25,$55,$58,$00,$00,$00,$00,$00,$00,$02,$AA,$00,$25,$55,$60,$00,$00,$02,$AA,$00,$00,$00
+0043E9  2  00 00 00 00  
+0043ED  2  00 02 AA 00  
+0043FB  2  95 55 58 00  	.byte $95,$55,$58,$00,$00,$00,$00,$00,$00,$09,$55,$80,$95,$55,$58,$00,$00,$09,$55,$80,$00,$00
+0043FF  2  00 00 00 00  
+004403  2  00 09 55 80  
+004411  2  95 55 58 2A  	.byte $95,$55,$58,$2A,$AA,$AA,$AA,$AA,$A0,$25,$55,$60,$95,$55,$5A,$AA,$AA,$A5,$55,$60,$2A,$AA
+004415  2  AA AA AA AA  
+004419  2  A0 25 55 60  
+004427  2  95 6A A8 95  	.byte $95,$6A,$A8,$95,$55,$95,$55,$55,$58,$25,$55,$60,$95,$65,$59,$56,$55,$A5,$55,$68,$95,$56
+00442B  2  55 95 55 55  
+00442F  2  58 25 55 60  
+00443D  2  95 6A AA 55  	.byte $95,$6A,$AA,$55,$55,$95,$55,$55,$56,$95,$55,$58,$95,$65,$59,$56,$55,$95,$55,$5A,$55,$56
+004441  2  55 95 55 55  
+004445  2  56 95 55 58  
+004453  2  95 65 5A 55  	.byte $95,$65,$5A,$55,$55,$95,$55,$55,$56,$95,$55,$58,$95,$65,$59,$56,$55,$95,$55,$5A,$55,$56
+004457  2  55 95 55 55  
+00445B  2  56 95 55 58  
+004469  2  95 65 59 55  	.byte $95,$65,$59,$55,$55,$95,$55,$55,$55,$95,$65,$58,$95,$65,$59,$56,$55,$95,$65,$59,$55,$56
+00446D  2  55 95 55 55  
+004471  2  55 95 65 58  
+00447F  2  95 65 59 55  	.byte $95,$65,$59,$55,$55,$95,$55,$55,$55,$95,$65,$58,$95,$65,$59,$56,$55,$95,$65,$59,$55,$56
+004483  2  55 95 55 55  
+004487  2  55 95 65 58  
+004495  2  95 65 59 56  	.byte $95,$65,$59,$56,$55,$95,$65,$56,$55,$95,$65,$58,$95,$65,$59,$56,$55,$95,$65,$59,$56,$AA
+004499  2  55 95 65 56  
+00449D  2  55 95 65 58  
+0044AB  2  95 65 59 56  	.byte $95,$65,$59,$56,$55,$95,$65,$56,$55,$95,$55,$58,$95,$65,$59,$56,$55,$95,$55,$59,$56,$AA
+0044AF  2  55 95 65 56  
+0044B3  2  55 95 55 58  
+0044C1  2  95 65 59 56  	.byte $95,$65,$59,$56,$55,$95,$65,$56,$55,$95,$55,$58,$95,$65,$59,$56,$55,$95,$55,$59,$56,$00
+0044C5  2  55 95 65 56  
+0044C9  2  55 95 55 58  
+0044D7  2  95 65 59 56  	.byte $95,$65,$59,$56,$55,$95,$65,$56,$55,$95,$55,$58,$95,$65,$59,$56,$55,$95,$55,$59,$56,$00
+0044DB  2  55 95 65 56  
+0044DF  2  55 95 55 58  
+0044ED  2  95 55 59 55  	.byte $95,$55,$59,$55,$55,$95,$65,$56,$55,$95,$5A,$A8,$95,$55,$59,$55,$56,$95,$5A,$A9,$56,$00
+0044F1  2  55 95 65 56  
+0044F5  2  55 95 5A A8  
+004503  2  95 55 59 55  	.byte $95,$55,$59,$55,$55,$95,$65,$56,$55,$95,$5A,$A8,$95,$55,$59,$55,$5A,$95,$5A,$A9,$56,$00
+004507  2  55 95 65 56  
+00450B  2  55 95 5A A8  
+004519  2  A5 55 5A 55  	.byte $A5,$55,$5A,$55,$55,$95,$65,$56,$55,$A5,$58,$00,$A5,$55,$69,$55,$68,$A5,$58,$09,$56,$00
+00451D  2  55 95 65 56  
+004521  2  55 A5 58 00  
+00452F  2  29 55 5A 95  	.byte $29,$55,$5A,$95,$55,$95,$65,$56,$55,$A9,$58,$00,$29,$55,$A9,$55,$A0,$29,$58,$09,$56,$00
+004533  2  55 95 65 56  
+004537  2  55 A9 58 00  
+004545  2  0A AA A8 AA  	.byte $0A,$AA,$A8,$AA,$AA,$AA,$AA,$AA,$AA,$8A,$A8,$00,$0A,$AA,$8A,$AA,$80,$0A,$A8,$0A,$AA,$00
+004549  2  AA AA AA AA  
+00454D  2  AA 8A A8 00  
+00455B  2  02 AA A8 2A  	.byte $02,$AA,$A8,$2A,$AA,$AA,$AA,$AA,$AA,$82,$A8,$00,$02,$AA,$0A,$AA,$00,$02,$A8,$0A,$AA,$00
+00455F  2  AA AA AA AA  
+004563  2  AA 82 A8 00  
+004571  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+004575  2  00 00 00 00  
+004579  2  00 00 00 00  
+004587  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+00458B  2  00 00 00 00  
+00458F  2  00 00 00 00  
+00459D  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+0045A1  2  00 00 00 00  
+0045A5  2  00 00 00 00  
+0045B3  2               
+0045B3  1               	.include "font.inc"		; Text scroller font
+0045B3  2               ; Title banner, 23 x 47
+0045B3  2               
+0045B3  2               title:
+0045B3  2  00 00 00 02  	.byte $00,$00,$00,$02,$AA,$00,$AA,$A0,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+0045B7  2  AA 00 AA A0  
+0045BB  2  00 00 00 00  
+0045CA  2  00 00 00 09  	.byte $00,$00,$00,$09,$55,$80,$95,$60,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+0045CE  2  55 80 95 60  
+0045D2  2  00 00 00 00  
+0045E1  2  00 00 00 25  	.byte $00,$00,$00,$25,$55,$60,$95,$60,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+0045E5  2  55 60 95 60  
+0045E9  2  00 00 00 00  
+0045F8  2  00 00 00 95  	.byte $00,$00,$00,$95,$55,$58,$95,$60,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+0045FC  2  55 58 95 60  
+004600  2  00 00 00 00  
+00460F  2  00 00 00 95  	.byte $00,$00,$00,$95,$55,$58,$95,$60,$02,$A0,$2A,$AA,$AA,$A8,$2A,$A8,$0A,$80,$00,$00,$00,$00,$00
+004613  2  55 58 95 60  
+004617  2  02 A0 2A AA  
+004626  2  00 00 00 95  	.byte $00,$00,$00,$95,$65,$5A,$95,$6A,$09,$58,$25,$55,$55,$56,$25,$58,$25,$60,$00,$00,$00,$00,$00
+00462A  2  65 5A 95 6A  
+00462E  2  09 58 25 55  
+00463D  2  00 00 00 95  	.byte $00,$00,$00,$95,$65,$59,$55,$56,$25,$56,$25,$55,$55,$55,$A5,$58,$95,$58,$00,$00,$00,$00,$00
+004641  2  65 59 55 56  
+004645  2  25 56 25 55  
+004654  2  00 00 00 95  	.byte $00,$00,$00,$95,$65,$59,$55,$56,$95,$55,$A5,$55,$55,$55,$A5,$5A,$55,$56,$00,$00,$00,$00,$00
+004658  2  65 59 55 56  
+00465C  2  95 55 A5 55  
+00466B  2  00 00 00 95  	.byte $00,$00,$00,$95,$65,$59,$55,$56,$55,$55,$65,$55,$55,$55,$65,$59,$55,$56,$00,$00,$00,$00,$00
+00466F  2  65 59 55 56  
+004673  2  55 55 65 55  
+004682  2  00 00 00 95  	.byte $00,$00,$00,$95,$55,$59,$55,$56,$55,$55,$65,$55,$55,$55,$6A,$A9,$55,$56,$00,$00,$00,$00,$00
+004686  2  55 59 55 56  
+00468A  2  55 55 65 55  
+004699  2  00 00 00 95  	.byte $00,$00,$00,$95,$55,$5A,$95,$6A,$55,$95,$65,$59,$55,$95,$65,$59,$55,$56,$00,$00,$00,$00,$00
+00469D  2  55 5A 95 6A  
+0046A1  2  55 95 65 59  
+0046B0  2  00 00 00 95  	.byte $00,$00,$00,$95,$55,$5A,$95,$6A,$55,$95,$65,$59,$55,$95,$65,$59,$56,$AA,$00,$00,$00,$00,$00
+0046B4  2  55 5A 95 6A  
+0046B8  2  55 95 65 59  
+0046C7  2  00 00 00 95  	.byte $00,$00,$00,$95,$55,$58,$95,$62,$55,$95,$65,$59,$55,$95,$65,$59,$55,$56,$00,$00,$00,$00,$00
+0046CB  2  55 58 95 62  
+0046CF  2  55 95 65 59  
+0046DE  2  00 00 00 95  	.byte $00,$00,$00,$95,$55,$58,$95,$6A,$55,$95,$65,$59,$55,$95,$65,$59,$55,$56,$00,$00,$00,$00,$00
+0046E2  2  55 58 95 6A  
+0046E6  2  55 95 65 59  
+0046F5  2  00 00 00 95  	.byte $00,$00,$00,$95,$55,$58,$95,$56,$55,$55,$65,$59,$55,$95,$65,$59,$55,$56,$00,$00,$00,$00,$00
+0046F9  2  55 58 95 56  
+0046FD  2  55 55 65 59  
+00470C  2  00 00 00 95  	.byte $00,$00,$00,$95,$65,$58,$95,$56,$95,$55,$A5,$59,$55,$95,$65,$5A,$55,$56,$00,$00,$00,$00,$00
+004710  2  65 58 95 56  
+004714  2  95 55 A5 59  
+004723  2  00 00 00 95  	.byte $00,$00,$00,$95,$65,$58,$A5,$56,$A5,$56,$A5,$59,$55,$95,$65,$5A,$95,$5A,$00,$00,$00,$00,$00
+004727  2  65 58 A5 56  
+00472B  2  A5 56 A5 59  
+00473A  2  00 00 00 95  	.byte $00,$00,$00,$95,$65,$58,$29,$56,$29,$5A,$25,$59,$55,$95,$65,$58,$A5,$68,$00,$00,$00,$00,$00
+00473E  2  65 58 29 56  
+004742  2  29 5A 25 59  
+004751  2  00 00 00 AA  	.byte $00,$00,$00,$AA,$AA,$A8,$0A,$AA,$0A,$A8,$2A,$AA,$AA,$AA,$AA,$A8,$2A,$A0,$00,$00,$00,$00,$00
+004755  2  AA A8 0A AA  
+004759  2  0A A8 2A AA  
+004768  2  00 00 00 AA  	.byte $00,$00,$00,$AA,$AA,$A8,$02,$AA,$02,$A0,$2A,$AA,$AA,$AA,$AA,$A8,$0A,$80,$00,$00,$00,$00,$00
+00476C  2  AA A8 02 AA  
+004770  2  02 A0 2A AA  
+00477F  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+004783  2  00 00 00 00  
+004787  2  00 00 00 00  
+004796  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+00479A  2  00 00 00 00  
+00479E  2  00 00 00 00  
+0047AD  2  02 AA AA A8  	.byte $02,$AA,$AA,$A8,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$2A,$AA,$80,$00,$00,$00,$00,$2A,$A8
+0047B1  2  00 00 00 00  
+0047B5  2  00 00 00 00  
+0047C4  2  09 55 65 58  	.byte $09,$55,$65,$58,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$25,$55,$60,$00,$00,$00,$00,$25,$58
+0047C8  2  00 00 00 00  
+0047CC  2  00 00 00 00  
+0047DB  2  25 55 65 58  	.byte $25,$55,$65,$58,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$25,$55,$58,$00,$00,$00,$00,$25,$58
+0047DF  2  00 00 00 00  
+0047E3  2  00 00 00 00  
+0047F2  2  95 55 65 58  	.byte $95,$55,$65,$58,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$25,$55,$56,$00,$00,$00,$00,$25,$58
+0047F6  2  00 00 00 00  
+0047FA  2  00 00 00 00  
+004809  2  95 55 65 58  	.byte $95,$55,$65,$58,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$25,$55,$56,$AA,$80,$00,$00,$25,$58
+00480D  2  00 00 00 00  
+004811  2  00 00 00 00  
+004820  2  95 6A A5 58  	.byte $95,$6A,$A5,$58,$2A,$AA,$AA,$AA,$0A,$AA,$A0,$AA,$AA,$A8,$25,$59,$56,$55,$82,$AA,$82,$A5,$58
+004824  2  2A AA AA AA  
+004828  2  0A AA A0 AA  
+004837  2  95 55 65 58  	.byte $95,$55,$65,$58,$95,$55,$95,$55,$89,$55,$58,$95,$65,$58,$25,$59,$56,$55,$89,$55,$89,$55,$58
+00483B  2  95 55 95 55  
+00483F  2  89 55 58 95  
+00484E  2  95 55 65 5A  	.byte $95,$55,$65,$5A,$55,$55,$95,$55,$69,$55,$56,$95,$65,$58,$25,$55,$56,$55,$A5,$55,$A5,$55,$58
+004852  2  55 55 95 55  
+004856  2  69 55 56 95  
+004865  2  95 55 65 59  	.byte $95,$55,$65,$59,$55,$55,$95,$55,$59,$55,$55,$95,$65,$58,$25,$55,$56,$55,$95,$55,$95,$55,$58
+004869  2  55 55 95 55  
+00486D  2  59 55 55 95  
+00487C  2  95 55 65 59  	.byte $95,$55,$65,$59,$55,$55,$95,$55,$59,$55,$55,$95,$65,$58,$25,$55,$56,$AA,$95,$55,$95,$55,$58
+004880  2  55 55 95 55  
+004884  2  59 55 55 95  
+004893  2  95 55 65 59  	.byte $95,$55,$65,$59,$56,$55,$95,$65,$59,$56,$55,$95,$65,$58,$25,$55,$56,$55,$95,$5A,$95,$65,$58
+004897  2  56 55 95 65  
+00489B  2  59 56 55 95  
+0048AA  2  95 6A A5 59  	.byte $95,$6A,$A5,$59,$56,$55,$95,$65,$59,$56,$55,$95,$65,$58,$25,$55,$56,$55,$95,$6A,$95,$65,$58
+0048AE  2  56 55 95 65  
+0048B2  2  59 56 55 95  
+0048C1  2  95 6A A5 59  	.byte $95,$6A,$A5,$59,$56,$55,$95,$65,$59,$56,$55,$95,$65,$58,$25,$59,$56,$55,$95,$68,$95,$65,$58
+0048C5  2  56 55 95 65  
+0048C9  2  59 56 55 95  
+0048D8  2  95 60 25 59  	.byte $95,$60,$25,$59,$56,$55,$95,$65,$59,$56,$55,$95,$55,$58,$25,$59,$56,$55,$95,$60,$95,$65,$58
+0048DC  2  56 55 95 65  
+0048E0  2  59 56 55 95  
+0048EF  2  95 60 25 59  	.byte $95,$60,$25,$59,$55,$55,$95,$55,$59,$55,$55,$95,$55,$58,$25,$55,$56,$55,$95,$60,$95,$55,$58
+0048F3  2  55 55 95 55  
+0048F7  2  59 55 55 95  
+004906  2  95 60 25 59  	.byte $95,$60,$25,$59,$55,$55,$95,$55,$59,$55,$55,$A5,$55,$58,$25,$55,$56,$55,$95,$60,$95,$55,$58
+00490A  2  55 55 95 55  
+00490E  2  59 55 55 A5  
+00491D  2  95 60 25 5A  	.byte $95,$60,$25,$5A,$55,$55,$95,$55,$69,$55,$56,$29,$55,$58,$25,$55,$5A,$55,$95,$60,$A5,$55,$58
+004921  2  55 55 95 55  
+004925  2  69 55 56 29  
+004934  2  95 60 25 5A  	.byte $95,$60,$25,$5A,$95,$55,$95,$55,$A9,$55,$5A,$0A,$A5,$58,$25,$55,$6A,$55,$95,$60,$29,$55,$58
+004938  2  95 55 95 55  
+00493C  2  A9 55 5A 0A  
+00494B  2  AA A0 2A A8  	.byte $AA,$A0,$2A,$A8,$AA,$AA,$95,$6A,$89,$56,$A8,$02,$A5,$58,$2A,$AA,$A2,$AA,$AA,$A0,$0A,$AA,$A8
+00494F  2  AA AA 95 6A  
+004953  2  89 56 A8 02  
+004962  2  AA A0 2A A8  	.byte $AA,$A0,$2A,$A8,$2A,$AA,$95,$6A,$09,$56,$A0,$02,$55,$58,$2A,$AA,$82,$AA,$AA,$A0,$02,$AA,$A8
+004966  2  2A AA 95 6A  
+00496A  2  09 56 A0 02  
+004979  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$95,$68,$09,$56,$80,$02,$55,$58,$00,$00,$00,$00,$00,$00,$00,$00,$00
+00497D  2  00 00 95 68  
+004981  2  09 56 80 02  
+004990  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$95,$68,$09,$56,$80,$02,$55,$68,$00,$00,$00,$00,$00,$00,$00,$00,$00
+004994  2  00 00 95 68  
+004998  2  09 56 80 02  
+0049A7  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$95,$68,$09,$56,$80,$02,$55,$A0,$00,$00,$00,$00,$00,$00,$00,$00,$00
+0049AB  2  00 00 95 68  
+0049AF  2  09 56 80 02  
+0049BE  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$AA,$A8,$0A,$AA,$80,$02,$AA,$80,$00,$00,$00,$00,$00,$00,$00,$00,$00
+0049C2  2  00 00 AA A8  
+0049C6  2  0A AA 80 02  
+0049D5  2  00 00 00 00  	.byte $00,$00,$00,$00,$00,$00,$AA,$A8,$0A,$AA,$80,$02,$AA,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+0049D9  2  00 00 AA A8  
+0049DD  2  0A AA 80 02  
+0049EC  2               
+0049EC  1               	.include "score.inc"		; Scoreboard digits
+0049EC  2               font:
+0049EC  2  00 00 00 00  cap32:	.byte $00,$00,$00,$00,$00,$00	; SPACE-32
+0049F0  2  00 00        
+0049F2  2  30 30 30 10  cap33:	.byte $30,$30,$30,$10,$30,$10	; !
+0049F6  2  30 10        
+0049F8  2  CC CC 44 00  cap34:	.byte $cc,$cc,$44,$00,$00,$00	; "
+0049FC  2  00 00        
+0049FE  2  CC FC DC FC  cap35:	.byte $cc,$fc,$dc,$fc,$dc,$44	; #
+004A02  2  DC 44        
+004A04  2  3C F4 70 3C  cap36:	.byte $3c,$f4,$70,$3c,$f4,$50	; $
+004A08  2  F4 50        
+004A0A  2  CC 4C 34 D0  cap37:	.byte $cc,$4c,$34,$d0,$c3,$41	; %
+004A0E  2  C3 41        
+004A10  2  30 DC 74 DC  cap38:	.byte $30,$dc,$74,$dc,$7c,$14	; &
+004A14  2  7C 14        
+004A16  2  C0 C0 40 00  cap39:	.byte $c0,$c0,$40,$00,$00,$00	; '
+004A1A  2  00 00        
+004A1C  2  0C 34 30 30  cap40:	.byte $0c,$34,$30,$30,$1c,$04	; (
+004A20  2  1C 04        
+004A22  2  C0 70 30 30  cap41:	.byte $c0,$70,$30,$30,$d0,$40	; )
+004A26  2  D0 40        
+004A28  2  00 CC 74 DC  cap42:	.byte $00,$cc,$74,$dc,$44,$00	; *
+004A2C  2  44 00        
+004A2E  2  00 30 FC 74  cap43:	.byte $00,$30,$fc,$74,$10,$00	; +
+004A32  2  10 00        
+004A34  2  00 00 00 30  cap44:	.byte $00,$00,$00,$30,$d0,$40	; ,
+004A38  2  D0 40        
+004A3A  2  00 00 FC 54  cap45:	.byte $00,$00,$fc,$54,$00,$00	; -
+004A3E  2  00 00        
+004A40  2  00 00 00 00  cap46:	.byte $00,$00,$00,$00,$0c,$04	; .
+004A44  2  0C 04        
+004A46  2  0C 0C 34 D0  cap47:	.byte $0c,$0c,$34,$d0,$c0,$40	; /
+004A4A  2  C0 40        
+004A4C  2               
+004A4C  2  30 DC FC DC  cap48:	.byte $30,$dc,$fc,$dc,$74,$10	; 0-48
+004A50  2  74 10        
+004A52  2  30 F0 70 30  cap49:	.byte $30,$f0,$70,$30,$fc,$54	; 1
+004A56  2  FC 54        
+004A58  2  F0 5C 34 D0  cap50:	.byte $f0,$5c,$34,$d0,$fc,$54	; 2
+004A5C  2  FC 54        
+004A5E  2  F0 5C 34 1C  cap51:	.byte $f0,$5c,$34,$1c,$f4,$50	; 3
+004A62  2  F4 50        
+004A64  2  C0 CC FC 5C  cap52:	.byte $c0,$cc,$fc,$5c,$0c,$04	; 4
+004A68  2  0C 04        
+004A6A  2  FC D4 70 1C  cap53:	.byte $fc,$d4,$70,$1c,$f4,$50	; 5
+004A6E  2  F4 50        
+004A70  2  3C D4 F0 DC  cap54:	.byte $3c,$d4,$f0,$dc,$74,$10	; 6
+004A74  2  74 10        
+004A76  2  FC 5C 34 D0  cap55:	.byte $fc,$5c,$34,$d0,$c0,$40	; 7
+004A7A  2  C0 40        
+004A7C  2  30 DC 74 DC  cap56:	.byte $30,$dc,$74,$dc,$74,$10	; 8
+004A80  2  74 10        
+004A82  2  30 DC 7C 1C  cap57:	.byte $30,$dc,$7c,$1c,$f4,$50	; 9
+004A86  2  F4 50        
+004A88  2               
+004A88  2  00 30 10 30  cap58:	.byte $00,$30,$10,$30,$10,$00	; :
+004A8C  2  10 00        
+004A8E  2  00 30 10 30  cap59:	.byte $00,$30,$10,$30,$d0,$40	; ;
+004A92  2  D0 40        
+004A94  2  0C 34 D0 70  cap60:	.byte $0c,$34,$d0,$70,$1c,$04	; <
+004A98  2  1C 04        
+004A9A  2  00 FC 54 FC  cap61:	.byte $00,$fc,$54,$fc,$54,$00	; =
+004A9E  2  54 00        
+004AA0  2  C0 70 1C 34  cap62:	.byte $c0,$70,$1c,$34,$d0,$40	; >
+004AA4  2  D0 40        
+004AA6  2  30 DC 4C 34  cap63:	.byte $30,$dc,$4c,$34,$30,$10	; ?
+004AAA  2  30 10        
+004AAC  2  30 DC CC C4  cap64:	.byte $30,$dc,$cc,$c4,$70,$10	; @
+004AB0  2  70 10        
+004AB2  2               
+004AB2  2  30 DC FC DC  cap65:	.byte $30,$dc,$fc,$dc,$cc,$44	; A-65
+004AB6  2  CC 44        
+004AB8  2  F0 DC F0 DC  cap66:	.byte $f0,$dc,$f0,$dc,$f0,$50	; B
+004ABC  2  F0 50        
+004ABE  2  3C D4 C0 C0  cap67:	.byte $3c,$d4,$c0,$c0,$3c,$14	; C
+004AC2  2  3C 14        
+004AC4  2  F0 DC CC CC  cap68:	.byte $f0,$dc,$cc,$cc,$f0,$50	; D
+004AC8  2  F0 50        
+004ACA  2  FC D4 F0 D0  cap69:	.byte $fc,$d4,$f0,$d0,$fc,$54	; E
+004ACE  2  FC 54        
+004AD0  2  FC D4 F0 D0  cap70:	.byte $fc,$d4,$f0,$d0,$c0,$40	; F
+004AD4  2  C0 40        
+004AD6  2  3C D4 C0 CC  cap71:	.byte $3c,$d4,$c0,$cc,$3c,$14	; G
+004ADA  2  3C 14        
+004ADC  2  CC CC FC DC  cap72:	.byte $cc,$cc,$fc,$dc,$cc,$44	; H
+004AE0  2  CC 44        
+004AE2  2  FC 74 30 30  cap73:	.byte $fc,$74,$30,$30,$fc,$54	; I
+004AE6  2  FC 54        
+004AE8  2  FC 74 30 30  cap74:	.byte $fc,$74,$30,$30,$d0,$40	; J
+004AEC  2  D0 40        
+004AEE  2  CC F4 F0 F0  cap75:	.byte $cc,$f4,$f0,$f0,$dc,$44	; K
+004AF2  2  DC 44        
+004AF4  2  C0 C0 C0 C0  cap76:	.byte $c0,$c0,$c0,$c0,$fc,$54	; L
+004AF8  2  FC 54        
+004AFA  2  CC FC DC CC  cap77:	.byte $cc,$fc,$dc,$cc,$cc,$44	; M
+004AFE  2  CC 44        
+004B00  2  CC FC FC FC  cap78:	.byte $cc,$fc,$fc,$fc,$dc,$44	; N
+004B04  2  DC 44        
+004B06  2  30 DC CC CC  cap79:	.byte $30,$dc,$cc,$cc,$74,$10	; O
+004B0A  2  74 10        
+004B0C  2  F0 DC F4 D0  cap80:	.byte $f0,$dc,$f4,$d0,$c0,$40	; P
+004B10  2  C0 40        
+004B12  2  30 DC CC CC  cap81:	.byte $30,$dc,$cc,$cc,$7c,$14	; Q
+004B16  2  7C 14        
+004B18  2  F0 DC F4 DC  cap82:	.byte $f0,$dc,$f4,$dc,$cc,$44	; R
+004B1C  2  CC 44        
+004B1E  2  3C D4 30 1C  cap83:	.byte $3c,$d4,$30,$1c,$f4,$50	; S
+004B22  2  F4 50        
+004B24  2  FC 74 30 30  cap84:	.byte $fc,$74,$30,$30,$30,$10	; T
+004B28  2  30 10        
+004B2A  2  CC CC CC CC  cap85:	.byte $cc,$cc,$cc,$cc,$7c,$14	; U
+004B2E  2  7C 14        
+004B30  2  CC CC CC CC  cap86:	.byte $cc,$cc,$cc,$cc,$74,$10	; V
+004B34  2  74 10        
+004B36  2  CC CC CC FC  cap87:	.byte $cc,$cc,$cc,$fc,$dc,$44	; W
+004B3A  2  DC 44        
+004B3C  2  CC 74 30 30  cap88:	.byte $cc,$74,$30,$30,$dc,$44	; X
+004B40  2  DC 44        
+004B42  2  CC CC 74 30  cap89:	.byte $cc,$cc,$74,$30,$30,$10	; Y
+004B46  2  30 10        
+004B48  2  FC 5C 34 D0  cap90:	.byte $fc,$5c,$34,$d0,$fc,$54	; Z
+004B4C  2  FC 54        
+004B4E  2               
+004B4E  2  00 00 00 00  cap91:	.byte $00,$00,$00,$00,$00,$00	; [
+004B52  2  00 00        
+004B54  2  00 00 00 00  cap92:	.byte $00,$00,$00,$00,$00,$00	; \
+004B58  2  00 00        
+004B5A  2  00 00 00 00  cap93:	.byte $00,$00,$00,$00,$00,$00	; ]
+004B5E  2  00 00        
+004B60  2  00 00 00 00  cap94:	.byte $00,$00,$00,$00,$00,$00	; ^
+004B64  2  00 00        
+004B66  2  00 00 00 00  cap95:	.byte $00,$00,$00,$00,$00,$00	; _
+004B6A  2  00 00        
+004B6C  2               
+004B6C  2               font_lb:
+004B6C  2  EC F2 F8 FE  	.byte <cap32,<cap33,<cap34,<cap35,<cap36,<cap37,<cap38,<cap39
+004B70  2  04 0A 10 16  
+004B74  2  1C 22 28 2E  	.byte <cap40,<cap41,<cap42,<cap43,<cap44,<cap45,<cap46,<cap47
+004B78  2  34 3A 40 46  
+004B7C  2  4C 52 58 5E  	.byte <cap48,<cap49,<cap50,<cap51,<cap52,<cap53,<cap54,<cap55
+004B80  2  64 6A 70 76  
+004B84  2  7C 82 88 8E  	.byte <cap56,<cap57,<cap58,<cap59,<cap60,<cap61,<cap62,<cap63
+004B88  2  94 9A A0 A6  
+004B8C  2  AC B2 B8 BE  	.byte <cap64,<cap65,<cap66,<cap67,<cap68,<cap69,<cap70,<cap71
+004B90  2  C4 CA D0 D6  
+004B94  2  DC E2 E8 EE  	.byte <cap72,<cap73,<cap74,<cap75,<cap76,<cap77,<cap78,<cap79
+004B98  2  F4 FA 00 06  
+004B9C  2  0C 12 18 1E  	.byte <cap80,<cap81,<cap82,<cap83,<cap84,<cap85,<cap86,<cap87
+004BA0  2  24 2A 30 36  
+004BA4  2  3C 42 48 4E  	.byte <cap88,<cap89,<cap90,<cap91,<cap92,<cap93,<cap94,<cap95
+004BA8  2  54 5A 60 66  
+004BAC  2               font_hb:
+004BAC  2  49 49 49 49  	.byte >cap32,>cap33,>cap34,>cap35,>cap36,>cap37,>cap38,>cap39
+004BB0  2  4A 4A 4A 4A  
+004BB4  2  4A 4A 4A 4A  	.byte >cap40,>cap41,>cap42,>cap43,>cap44,>cap45,>cap46,>cap47
+004BB8  2  4A 4A 4A 4A  
+004BBC  2  4A 4A 4A 4A  	.byte >cap48,>cap49,>cap50,>cap51,>cap52,>cap53,>cap54,>cap55
+004BC0  2  4A 4A 4A 4A  
+004BC4  2  4A 4A 4A 4A  	.byte >cap56,>cap57,>cap58,>cap59,>cap60,>cap61,>cap62,>cap63
+004BC8  2  4A 4A 4A 4A  
+004BCC  2  4A 4A 4A 4A  	.byte >cap64,>cap65,>cap66,>cap67,>cap68,>cap69,>cap70,>cap71
+004BD0  2  4A 4A 4A 4A  
+004BD4  2  4A 4A 4A 4A  	.byte >cap72,>cap73,>cap74,>cap75,>cap76,>cap77,>cap78,>cap79
+004BD8  2  4A 4A 4B 4B  
+004BDC  2  4B 4B 4B 4B  	.byte >cap80,>cap81,>cap82,>cap83,>cap84,>cap85,>cap86,>cap87
+004BE0  2  4B 4B 4B 4B  
+004BE4  2  4B 4B 4B 4B  	.byte >cap88,>cap89,>cap90,>cap91,>cap92,>cap93,>cap94,>cap95
+004BE8  2  4B 4B 4B 4B  
+004BEC  2               
+004BEC  1               eind_asm:
+004BEC  2               ; Score digits used on scoreboard
+004BEC  2               
+004BEC  2               score_digits:
+004BEC  2               
+004BEC  2  AA A9 95 59  sc0:	.byte $aa,$a9,$95,$59,$95,$59,$96,$59,$96,$59,$96,$59,$96,$59,$95,$59
+004BF0  2  95 59 96 59  
+004BF4  2  96 59 96 59  
+004BFC  2  95 59 AA A9  	.byte $95,$59,$aa,$a9
+004C00  2               
+004C00  2  AA 95 95 95  sc1:	.byte $aa,$95,$95,$95,$95,$95,$a5,$95,$65,$95,$65,$95,$65,$95,$65,$95
+004C04  2  95 95 A5 95  
+004C08  2  65 95 65 95  
+004C10  2  65 95 6A 95  	.byte $65,$95,$6a,$95
+004C14  2               
+004C14  2  AA A9 95 59  sc2:	.byte $aa,$a9,$95,$59,$95,$59,$aa,$59,$95,$59,$95,$59,$96,$a9,$95,$59
+004C18  2  95 59 AA 59  
+004C1C  2  95 59 95 59  
+004C24  2  95 59 AA A9  	.byte $95,$59,$aa,$a9
+004C28  2               
+004C28  2  AA A9 95 59  sc3:	.byte $aa,$a9,$95,$59,$95,$59,$aa,$59,$95,$59,$95,$59,$aa,$59,$95,$59
+004C2C  2  95 59 AA 59  
+004C30  2  95 59 95 59  
+004C38  2  95 59 AA A9  	.byte $95,$59,$aa,$a9
+004C3C  2               
+004C3C  2  AA A9 96 59  sc4:	.byte $aa,$a9,$96,$59,$96,$59,$96,$59,$95,$59,$95,$59,$aa,$59,$56,$59
+004C40  2  96 59 96 59  
+004C44  2  95 59 95 59  
+004C4C  2  56 59 56 A9  	.byte $56,$59,$56,$a9
+004C50  2               
+004C50  2  AA A9 95 59  sc5:	.byte $aa,$a9,$95,$59,$95,$59,$96,$a9,$95,$59,$95,$59,$aa,$59,$95,$59
+004C54  2  95 59 96 A9  
+004C58  2  95 59 95 59  
+004C60  2  95 59 AA A9  	.byte $95,$59,$aa,$a9
+004C64  2               
+004C64  2  AA A9 95 59  sc6:	.byte $aa,$a9,$95,$59,$95,$59,$96,$a9,$95,$59,$95,$59,$96,$59,$95,$59
+004C68  2  95 59 96 A9  
+004C6C  2  95 59 95 59  
+004C74  2  95 59 AA A9  	.byte $95,$59,$aa,$a9
+004C78  2               
+004C78  2  AA A9 95 59  sc7:	.byte $aa,$a9,$95,$59,$95,$59,$96,$59,$96,$59,$aa,$59,$56,$59,$56,$59
+004C7C  2  95 59 96 59  
+004C80  2  96 59 AA 59  
+004C88  2  56 59 56 A9  	.byte $56,$59,$56,$a9
+004C8C  2               
+004C8C  2  AA A9 95 59  sc8:	.byte $aa,$a9,$95,$59,$95,$59,$96,$59,$95,$59,$95,$59,$96,$59,$95,$59
+004C90  2  95 59 96 59  
+004C94  2  95 59 95 59  
+004C9C  2  95 59 AA A9  	.byte $95,$59,$aa,$a9
+004CA0  2               
+004CA0  2  AA A9 95 59  sc9:	.byte $aa,$a9,$95,$59,$95,$59,$96,$59,$95,$59,$95,$59,$aa,$59,$95,$59
+004CA4  2  95 59 96 59  
+004CA8  2  95 59 95 59  
+004CB0  2  95 59 AA A9  	.byte $95,$59,$aa,$a9
+004CB4  2               
+004CB4  2  EC 00 14 28  sc_digit_lb:	.byte <sc0,<sc1,<sc2,<sc3,<sc4,<sc5,<sc6,<sc7,<sc8,<sc9
+004CB8  2  3C 50 64 78  
+004CBC  2  8C A0        
+004CBE  2  4B 4C 4C 4C  sc_digit_hb:	.byte >sc0,>sc1,>sc2,>sc3,>sc4,>sc5,>sc6,>sc7,>sc8,>sc9
+004CC2  2  4C 4C 4C 4C  
+004CC6  2  4C 4C        
+004CC8  2               
+004CC8  2  00 01 20 21  sc_tab:	.byte $00,$01,$20,$21,$40,$41,$60,$61,$80,$81,$a0,$a1,$c0,$c1,$e0,$e1
+004CCC  2  40 41 60 61  
+004CD0  2  80 81 A0 A1  
+004CD8  2               
+004CD8  1               
